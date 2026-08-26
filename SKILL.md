@@ -1,11 +1,11 @@
 ---
 name: zlog
-description: Multi-agent session log compressor and storage optimizer. Gzip `.log`, `.out`, `.txt`, `.trace` (>10KB) -> `.gz` in `~/.gemini`, `~/.agents`, `~/.config/Cursor`, `~/.ollama`, etc. Auto-discovers AI log dirs. Safe for concurrent multi-instance running agents. Use when wrapping up, ending sessions, or asked to clean logs, zlog, pack logs, or find new AI agents.
+description: Multi-agent session log compressor and storage optimizer. Compresses `.log`, `.out`, `.txt`, `.trace` (>10KB) to `.gz` (Linux/macOS/WSL) or `.zip` (Windows) in `~/.gemini`, `~/.agents`, `~/.config/Cursor`, `~/.ollama`, etc. Auto-discovers AI log dirs. Safe for concurrent multi-instance running agents. Use when wrapping up, ending sessions, or asked to clean logs, zlog, pack logs, or find new AI agents.
 license: MIT
 compatibility: Linux, macOS, WSL, Windows 11 (Bash, Zsh, Git Bash, PowerShell)
 allowed-tools: Bash(*) Read Write
 metadata:
-  version: "5.0"
+  version: "5.1"
   registry: skills.sh
 ---
 
