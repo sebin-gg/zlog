@@ -11,7 +11,7 @@
   <a href="https://github.com/sebin-gg/zlog/stargazers"><img src="https://img.shields.io/github/stars/sebin-gg/zlog?style=social" alt="Stars"></a>
 </p>
 
-Compress background tool logs across 16 AI agent runtimes. Save ~77%-99.9% SSD space (up to 500x ratio). Keep conversation transcripts 100% intact.
+Compress background tool logs across core AI agent runtimes. Save ~77%-99.9% SSD space (up to 500x ratio). Keep conversation transcripts 100% intact.
 
 ---
 
@@ -19,10 +19,10 @@ Compress background tool logs across 16 AI agent runtimes. Save ~77%-99.9% SSD s
 
 - **77%-99.9% Disk Space Savings**: Compresses `.log`, `.out`, `.txt`, `.trace` files into `.zst`, `.xz`, or `.gz` archives.
 - **Context-Safe**: Excludes `transcript.jsonl` files. Zero memory loss for AI agents.
-- **Process Lock Safety**: Checks kernel locks via `fuser -s` (Linux/WSL) or `lsof` (macOS). Skips open files.
+- **Process Lock Safety**: Checks kernel locks via `fuser -s` (Linux/WSL), `lsof` (macOS), or `[System.IO.File]::Open` (Windows 11). Skips open files.
 - **In-Flight Guard**: Skips files modified <60 seconds ago (`-mmin +1`).
 - **Dry-Run Mode**: Preview space savings without touching files.
-- **16 AI Agent Presets**: Auto-targets Antigravity, Gemini CLI, Global Agent Skills, Cursor, Claude Code, Ollama, Aider, Continue, Windsurf, Codeium, OpenHands, Codex, Hugging Face, and LM Studio.
+- **Core AI Agent Presets**: Auto-targets Antigravity, Gemini CLI, Cursor, Claude Code, Ollama, Windsurf, Codex, and LM Studio.
 
 ---
 
@@ -57,7 +57,7 @@ npx skills add sebin-gg/zlog
 ```mermaid
 graph TD
     A["User / Wrap-up Trigger"] --> B{"Scan AI Agent Paths"}
-    B --> C["~/.gemini, ~/.agents, ~/.config/Cursor, ~/.ollama, etc."]
+    B --> C["~/.gemini, ~/.config/Cursor, ~/.ollama, ~/.claude, etc."]
     C --> D{"Process Lock Check"}
     D -- "fuser / lsof detects active PID" --> E["Skip File - In-Flight Safety"]
     D -- "No active process lock" --> F{"File Filters"}
@@ -68,26 +68,20 @@ graph TD
 
 ---
 
-## 🌐 16 Supported AI Agent Runtimes
+## 🌐 Supported AI Agent Runtimes
 
 | # | AI Agent / IDE | Default Path | OS Support |
 | :---: | :--- | :--- | :--- |
 | 1 | **Antigravity CLI** | `~/.gemini/antigravity-cli/logs/` | Linux, macOS, Windows 11 |
 | 2 | **Gemini CLI** | `~/.gemini/` | Linux, macOS, Windows 11 |
-| 3 | **Global Agent Skills** | `~/.agents/` | Linux, macOS, Windows 11 |
-| 4 | **Cursor IDE** | `~/.config/Cursor/` | Linux, macOS, Windows 11 |
-| 5 | **Cursor (Legacy)** | `~/.cursor/` | Linux, macOS, Windows 11 |
-| 6 | **Claude Code** | `~/.claude/` | Linux, macOS, Windows 11 |
-| 7 | **Claude Code Config** | `~/.config/claude-code/` | Linux, macOS, Windows 11 |
-| 8 | **Ollama** | `~/.ollama/` | Linux, macOS, Windows 11 |
-| 9 | **Aider AI** | `~/.aider/` | Linux, macOS, Windows 11 |
-| 10 | **Continue.dev** | `~/.continue/` | Linux, macOS, Windows 11 |
-| 11 | **Codeium** | `~/.codeium/` | Linux, macOS, Windows 11 |
-| 12 | **Windsurf** | `~/.windsurf/` | Linux, macOS, Windows 11 |
-| 13 | **OpenHands** | `~/.openhands/` | Linux, macOS, Windows 11 |
-| 14 | **Codex CLI** | `~/.codex/` | Linux, macOS, Windows 11 |
-| 15 | **Hugging Face** | `~/.cache/huggingface/` | Linux, macOS, Windows 11 |
-| 16 | **LM Studio** | `~/.cache/lm-studio/` | Linux, macOS, Windows 11 |
+| 3 | **Cursor IDE** | `~/.config/Cursor/` | Linux, macOS, Windows 11 |
+| 4 | **Cursor (Legacy)** | `~/.cursor/` | Linux, macOS, Windows 11 |
+| 5 | **Claude Code** | `~/.claude/` | Linux, macOS, Windows 11 |
+| 6 | **Claude Code Config** | `~/.config/claude-code/` | Linux, macOS, Windows 11 |
+| 7 | **Ollama** | `~/.ollama/` | Linux, macOS, Windows 11 |
+| 8 | **Windsurf** | `~/.windsurf/` | Linux, macOS, Windows 11 |
+| 9 | **Codex CLI** | `~/.codex/` | Linux, macOS, Windows 11 |
+| 10 | **LM Studio** | `~/.cache/lm-studio/` | Linux, macOS, Windows 11 |
 
 ---
 
@@ -96,19 +90,19 @@ graph TD
 ### POSIX Shell (Linux, macOS, WSL, Git Bash)
 
 ```bash
-for d in ~/.gemini ~/.agents ~/.config/Cursor ~/.cursor ~/.ollama ~/.claude ~/.config/claude-code ~/.aider ~/.continue ~/.codeium ~/.windsurf ~/.openhands ~/.codex ~/.cache/huggingface ~/.cache/lm-studio; do
+for d in ~/.gemini ~/.config/Cursor ~/.cursor ~/.ollama ~/.claude ~/.config/claude-code ~/.windsurf ~/.codex ~/.cache/lm-studio; do
   if [ -d "$d" ]; then
     find -L "$d" \( -name "*.log" -o -name "*.out" -o -name "*.trace" -o -name "*.txt" \) -empty -type f -delete 2>/dev/null || true
     find -L "$d" \( -name "*.log" -o -name "*.out" -o -name "*.trace" -o -name "*.txt" \) -not -name "*.gz" -not -name "*.zst" -not -name "*.xz" -not -name "*.jsonl" -not -name "SKILL.md" -not -iname "README*" -not -iname "LICENSE*" -size +10k -mmin +1 -exec sh -c 'for f; do (command -v fuser >/dev/null 2>&1 && fuser -s "$f" 2>/dev/null) || (command -v lsof >/dev/null 2>&1 && lsof "$f" >/dev/null 2>&1) || (command -v zstd >/dev/null 2>&1 && zstd -15 -q --rm "$f") || (command -v xz >/dev/null 2>&1 && xz -9 "$f") || gzip -f "$f"; done' sh {} + 2>/dev/null || true
-    [ ! -L "$d" ] && du -sh "$d" 2>/dev/null || true
   fi
 done
+dirs=(); for d in ~/.gemini ~/.config/Cursor ~/.cursor ~/.ollama ~/.claude ~/.config/claude-code ~/.windsurf ~/.codex ~/.cache/lm-studio; do [ -d "$d" ] && [ ! -L "$d" ] && dirs+=("$d"); done; [ ${#dirs[@]} -gt 0 ] && du -ch "${dirs[@]}" 2>/dev/null | tail -n 1 || true
 ```
 
-### Windows 11 Native Compression (PowerShell - .gz via built-in tar.exe)
+### Windows 11 Native Compression (PowerShell - Process Lock Safe)
 
 ```powershell
-Get-ChildItem -Path "$env:USERPROFILE\.gemini","$env:USERPROFILE\.agents","$env:USERPROFILE\.cursor","$env:USERPROFILE\.ollama","$env:USERPROFILE\.claude" -Recurse -Include *.log,*.out,*.txt,*.trace -Exclude *.gz,*.zst,*.xz,*.jsonl,SKILL.md,README*,LICENSE* -ErrorAction SilentlyContinue | Where-Object { $_.Length -gt 10KB -and $_.LastWriteTime -lt (Get-Date).AddMinutes(-1) } | ForEach-Object { tar.exe -czf "$($_.FullName).gz" "$($_.FullName)"; Remove-Item $_.FullName }
+Get-ChildItem -Path "$env:USERPROFILE\.gemini","$env:USERPROFILE\.cursor","$env:USERPROFILE\.ollama","$env:USERPROFILE\.claude" -Recurse -Include *.log,*.out,*.txt,*.trace -Exclude *.gz,*.zst,*.xz,*.jsonl,SKILL.md,README*,LICENSE* -ErrorAction SilentlyContinue | Where-Object { $_.Length -gt 10KB -and $_.LastWriteTime -lt (Get-Date).AddMinutes(-1) -and (try { $s = [System.IO.File]::Open($_.FullName, 'Open', 'ReadWrite', 'None'); $s.Close(); $true } catch { $false }) } | ForEach-Object { tar.exe -czf "$($_.FullName).gz" "$($_.FullName)"; Remove-Item $_.FullName }
 ```
 
 ---
@@ -116,7 +110,7 @@ Get-ChildItem -Path "$env:USERPROFILE\.gemini","$env:USERPROFILE\.agents","$env:
 ## ❓ FAQ
 
 - **Break chat history?** No. `transcript.jsonl` files excluded.
-- **Process safety?** `fuser -s` / `lsof` checks kernel locks. Open files skipped.
+- **Process safety?** `fuser -s` / `lsof` / `System.IO.File::Open` checks kernel locks. Open files skipped.
 - **Read compressed logs?** `zstdcat file.log.zst` or `zcat file.log.gz` to view, `zstdgrep "error" file.log.zst` or `zgrep "error" file.log.gz` to search.
 
 ---
