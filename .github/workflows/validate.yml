@@ -1,0 +1,34 @@
+name: Validate Agent Skill
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate SKILL.md Frontmatter & Syntax
+        run: |
+          python3 -c '
+          import sys, yaml
+          with open("SKILL.md", "r") as f:
+              content = f.read()
+          if not content.startswith("---"):
+              print("Error: SKILL.md missing frontmatter start marker")
+              sys.exit(1)
+          parts = content.split("---", 2)
+          if len(parts) < 3:
+              print("Error: SKILL.md frontmatter improperly formatted")
+              sys.exit(1)
+          fm = yaml.safe_load(parts[1])
+          required = ["name", "description", "license", "compatibility", "allowed-tools"]
+          for req in required:
+              if req not in fm:
+                  print(f"Error: Missing required field {req}")
+                  sys.exit(1)
+          print("✓ SKILL.md frontmatter validation passed!")
+          '
