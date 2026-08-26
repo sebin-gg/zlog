@@ -12,17 +12,16 @@
 
 ## 🚀 Quick Install
 
-### via `skills.sh` CLI (Recommended)
+### One-Line Terminal Install
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/sebin-gg/zlog/main/install.sh | bash
+```
+
+### via `skills.sh` CLI
 
 ```bash
 npx skills add sebin-gg/zlog
-```
-
-### Manual Installation
-
-```bash
-mkdir -p ~/.agents/skills/zlog
-cp SKILL.md ~/.agents/skills/zlog/
 ```
 
 ---
@@ -32,6 +31,7 @@ cp SKILL.md ~/.agents/skills/zlog/
 - ⚡ **77% Disk Space Savings**: Compresses `.log`, `.out`, `.txt`, `.trace` logs into `.gz` archives.
 - 🛡️ **Context-Safe**: Keeps `transcript.jsonl` files uncompressed for AI memory continuity.
 - 🔒 **Process Lock Protection**: Queries kernel locks (`fuser -s` / `lsof`) to skip active in-flight log files open by running subagents or IDE instances.
+- 🔍 **Dry-Run Mode**: Preview space savings without modifying any files.
 - 🎯 **Noise Filter**: Skips tiny files (<10KB) and documentation (`README*`, `LICENSE*`).
 - 🌐 **Multi-Agent Preset Support**: Auto-targets Antigravity, Gemini, Cursor, Claude Code, Ollama, Aider, Continue, Windsurf, Codeium, OpenHands, Codex, and Hugging Face.
 
