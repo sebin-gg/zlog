@@ -108,12 +108,18 @@ Get-ChildItem -Path "$env:USERPROFILE\.gemini","$env:USERPROFILE\.cursor","$env:
 
 ## ❓ FAQ
 
-- **Will this break my AI agent's memory?**  
-  No. Conversation transcripts (`transcript.jsonl`) are strictly excluded.
-- **What if an agent is currently writing a log?**  
-  Kernel lock check (`fuser` / `lsof` / `System.IO.File`) skips active files. Plus, files modified $<60\text{s}$ ago are skipped (`-mmin +1`).
-- **How do I inspect compressed logs?**  
-  Use `zstdcat file.log.zst` or `zcat file.log.gz`. Search using `zstdgrep "pattern" file.log.zst` or `zgrep "pattern" file.log.gz`.
+- **Does `zlog` break chat history?**  
+  **No.** `transcript.jsonl` files are strictly excluded. 100% memory retained.
+
+- **What if an AI agent is actively writing to a log file?**  
+  **Safe.** Kernel lock checks (`fuser -s` / `lsof` / `System.IO.File`) & 60s age buffer (`-mmin +1`) skip active files.
+
+- **How do I read or search compressed `.zst` / `.gz` logs?**  
+  - Read: `zstdcat file.log.zst` or `zcat file.log.gz`
+  - Search: `zstdgrep "error" file.log.zst` or `zgrep "error" file.log.gz`
+
+- **Is `zlog` safe to run during multi-agent sessions?**  
+  **Yes.** Concurrent process locks and age filters guarantee safe execution across all running agents.
 
 ---
 
