@@ -1,11 +1,11 @@
 ---
 name: zlog
-description: Multi-agent session log compressor and storage optimizer. Compresses `.log`, `.out`, `.txt`, `.trace` (>10KB) to `.gz` (Linux/macOS/WSL) or `.zip` (Windows) in `~/.gemini`, `~/.agents`, `~/.config/Cursor`, `~/.ollama`, etc. Auto-discovers AI log dirs. Safe for concurrent multi-instance running agents. Use when wrapping up, ending sessions, or asked to clean logs, zlog, pack logs, or find new AI agents.
+description: Multi-agent session log compressor and storage optimizer. Compresses `.log`, `.out`, `.txt`, `.trace` (>10KB) to `.gz` (Linux/macOS/WSL) or `.zip` (Windows) in `~/.gemini`, `~/.agents`, `~/.config/Cursor`, `~/.ollama`, etc. Auto-discovers AI log dirs. Safe for concurrent multi-instance running agents. Includes Dry-Run preview mode. Use when wrapping up, ending sessions, or asked to clean logs, zlog, pack logs, or find new AI agents.
 license: MIT
 compatibility: Linux, macOS, WSL, Windows 11 (Bash, Zsh, Git Bash, PowerShell)
 allowed-tools: Bash(*) Read Write
 metadata:
-  version: "5.1"
+  version: "5.2"
   registry: skills.sh
 ---
 
@@ -21,6 +21,14 @@ for d in ~/.gemini ~/.agents ~/.config/Cursor ~/.cursor ~/.ollama ~/.claude ~/.c
     find -L "$d" \( -name "*.log" -o -name "*.out" -o -name "*.trace" -o -name "*.txt" \) -not -name "*.gz" -not -name "*.jsonl" -not -name "SKILL.md" -not -iname "README*" -not -iname "LICENSE*" -size +10k -mmin +1 -exec sh -c 'for f; do (command -v fuser >/dev/null 2>&1 && fuser -s "$f" 2>/dev/null) || (command -v lsof >/dev/null 2>&1 && lsof "$f" >/dev/null 2>&1) || gzip -f "$f"; done' sh {} + 2>/dev/null || true
     [ ! -L "$d" ] && du -sh "$d" 2>/dev/null || true
   fi
+done
+```
+
+## Dry-Run Mode (Preview Without Modifying Files)
+
+```bash
+for d in ~/.gemini ~/.agents ~/.config/Cursor ~/.cursor ~/.ollama ~/.claude ~/.config/claude-code ~/.aider ~/.continue ~/.codeium ~/.windsurf ~/.openhands ~/.codex ~/.cache/huggingface ~/.cache/lm-studio; do
+  [ -d "$d" ] && find -L "$d" \( -name "*.log" -o -name "*.out" -o -name "*.trace" -o -name "*.txt" \) -not -name "*.gz" -not -name "*.jsonl" -not -name "SKILL.md" -not -iname "README*" -not -iname "LICENSE*" -size +10k -mmin +1 -exec echo "[DRY-RUN] Would compress:" {} + 2>/dev/null || true
 done
 ```
 
