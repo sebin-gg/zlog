@@ -1,6 +1,6 @@
 # zlog — Multi-Agent Session Log Storage Optimizer
 
-![zlog Social Card](assets/zlog-social-card.svg)
+![zlog Social Card](https://raw.githubusercontent.com/sebin-gg/zlog/main/assets/zlog-social-card.svg)
 
 <p align="center">
   <a href="https://agentskills.io"><img src="https://img.shields.io/badge/spec-agentskills.io-blue" alt="Spec"></a>
