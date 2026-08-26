@@ -5,7 +5,7 @@ license: MIT
 compatibility: Linux, macOS, WSL, Windows 11 (Bash, Zsh, Git Bash, PowerShell)
 allowed-tools: Bash(*) Read Write
 metadata:
-  version: "13.0"
+  version: "1.0.0"
   registry: skills.sh
 ---
 
