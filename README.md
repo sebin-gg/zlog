@@ -11,23 +11,48 @@
   <a href="https://github.com/sebin-gg/zlog/stargazers"><img src="https://img.shields.io/github/stars/sebin-gg/zlog?style=social" alt="Stars"></a>
 </p>
 
-> **Compresses background tool logs across 15+ AI agent runtimes to save ~77% SSD space (4.3x compression ratio) while keeping conversation transcripts 100% readable.**
+Compress background tool logs across 15+ AI agent runtimes. Save ~77% SSD space (4.3x compression ratio). Keep conversation transcripts 100% intact.
 
 ---
 
-## 📊 Performance & Benchmark Metrics
+## ⚡ Key Features
 
-| Metric | Without `zlog` (Raw Logs) | With `zlog` (Optimized) | Advantage |
+- **77% Disk Space Savings**: Gzip `.log`, `.out`, `.txt`, `.trace` files into `.gz` (or `.zip` on Windows).
+- **Context-Safe**: Excludes `transcript.jsonl` files. Zero memory loss for AI agents.
+- **Process Lock Safety**: Checks kernel locks via `fuser -s` (Linux/WSL) or `lsof` (macOS). Skips open files.
+- **In-Flight Guard**: Skips files modified <60 seconds ago (`-mmin +1`).
+- **Dry-Run Mode**: Preview space savings without touching files.
+- **15+ AI Agent Presets**: Auto-targets Antigravity, Gemini, Cursor, Claude Code, Ollama, Aider, Continue, Windsurf, Codeium, OpenHands, Codex, and Hugging Face.
+
+---
+
+## 📊 Performance Benchmark
+
+| Metric | Raw Logs | With `zlog` | Storage Saved |
 | :--- | :--- | :--- | :--- |
-| **Average Compression Ratio** | 1.0x (Uncompressed) | **4.3x (Gzip / Zip)** | **77% Disk Space Saved** |
-| **Monthly Storage Bloat** | ~9.0 GB | **~2.07 GB** | **~6.93 GB Reclaimed / Month** |
-| **Yearly Storage Bloat** | ~108 GB | **~24.8 GB** | **~83.2 GB Reclaimed / Year** |
-| **Process Safety Guard** | None (Risk of file corruption) | **Kernel Lock Checked (`fuser`/`lsof`)** | **Zero Process Interruption** |
-| **Context Memory Safety** | Risk of wiping history | **`transcript.jsonl` Untouched** | **100% AI Memory Retained** |
+| **Compression Ratio** | 1.0x | **4.3x (.gz / .zip)** | **77% SSD Space Saved** |
+| **Monthly Footprint** | ~9.0 GB | **~2.07 GB** | **~6.93 GB / Month Saved** |
+| **Yearly Footprint** | ~108 GB | **~24.8 GB** | **~83.2 GB / Year Saved** |
 
 ---
 
-## 🏗️ Architecture & Data Flow
+## 🚀 Installation
+
+### One-Line Install
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/sebin-gg/zlog/main/install.sh | bash
+```
+
+### `skills.sh` CLI
+
+```bash
+npx skills add sebin-gg/zlog
+```
+
+---
+
+## 🏗️ Architecture
 
 ```mermaid
 graph TD
@@ -45,40 +70,24 @@ graph TD
 
 ## 🌐 Supported AI Agent Runtimes
 
-| AI Agent / IDE | Config / Log Path | Supported OS | Auto-Discovered |
-| :--- | :--- | :--- | :---: |
-| **Antigravity CLI** | `~/.gemini/antigravity-cli/logs/` | Linux, macOS, Win 11 | Yes |
-| **Gemini CLI** | `~/.gemini/` | Linux, macOS, Win 11 | Yes |
-| **Global Agent Skills** | `~/.agents/` | Linux, macOS, Win 11 | Yes |
-| **Cursor IDE** | `~/.config/Cursor/` & `~/.cursor/` | Linux, macOS, Win 11 | Yes |
-| **Claude Code** | `~/.claude/` & `~/.config/claude-code/` | Linux, macOS, Win 11 | Yes |
-| **Ollama** | `~/.ollama/` & `~/.cache/ollama/` | Linux, macOS, Win 11 | Yes |
-| **Aider AI** | `~/.aider/` | Linux, macOS, Win 11 | Yes |
-| **Continue.dev** | `~/.continue/` | Linux, macOS, Win 11 | Yes |
-| **Windsurf / Codeium** | `~/.windsurf/` & `~/.codeium/` | Linux, macOS, Win 11 | Yes |
-| **OpenHands** | `~/.openhands/` | Linux, macOS, Win 11 | Yes |
-| **Codex CLI** | `~/.codex/` | Linux, macOS, Win 11 | Yes |
-| **LM Studio & Hugging Face** | `~/.cache/lm-studio/` & `~/.cache/huggingface/` | Linux, macOS, Win 11 | Yes |
+| AI Agent / IDE | Default Path | OS Support |
+| :--- | :--- | :--- |
+| **Antigravity CLI** | `~/.gemini/antigravity-cli/logs/` | Linux, macOS, Windows 11 |
+| **Gemini CLI** | `~/.gemini/` | Linux, macOS, Windows 11 |
+| **Global Agent Skills** | `~/.agents/` | Linux, macOS, Windows 11 |
+| **Cursor IDE** | `~/.config/Cursor/` & `~/.cursor/` | Linux, macOS, Windows 11 |
+| **Claude Code** | `~/.claude/` & `~/.config/claude-code/` | Linux, macOS, Windows 11 |
+| **Ollama** | `~/.ollama/` & `~/.cache/ollama/` | Linux, macOS, Windows 11 |
+| **Aider AI** | `~/.aider/` | Linux, macOS, Windows 11 |
+| **Continue.dev** | `~/.continue/` | Linux, macOS, Windows 11 |
+| **Windsurf / Codeium** | `~/.windsurf/` & `~/.codeium/` | Linux, macOS, Windows 11 |
+| **OpenHands** | `~/.openhands/` | Linux, macOS, Windows 11 |
+| **Codex CLI** | `~/.codex/` | Linux, macOS, Windows 11 |
+| **LM Studio & Hugging Face** | `~/.cache/lm-studio/` & `~/.cache/huggingface/` | Linux, macOS, Windows 11 |
 
 ---
 
-## 🚀 Quick Install
-
-### One-Line Terminal Install
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/sebin-gg/zlog/main/install.sh | bash
-```
-
-### via `skills.sh` CLI
-
-```bash
-npx skills add sebin-gg/zlog
-```
-
----
-
-## 💻 CLI Execution Snippets
+## 💻 CLI Snippets
 
 ### POSIX Shell (Linux, macOS, WSL, Git Bash)
 
@@ -99,30 +108,11 @@ Get-ChildItem -Path "$env:USERPROFILE\.gemini","$env:USERPROFILE\.agents","$env:
 
 ---
 
-## ❓ Frequently Asked Questions (FAQ)
+## ❓ FAQ
 
-<details>
-<summary><b>Does zlog break my AI agent's chat history?</b></summary>
-<br>
-<b>No.</b> <code>zlog</code> explicitly ignores all <code>transcript.jsonl</code> files. Your conversation history, line references, and subagent traces remain 100% readable by your AI agents.
-</details>
-
-<details>
-<summary><b>What happens if an AI agent is currently running and writing a log?</b></summary>
-<br>
-<code>zlog</code> queries kernel file descriptor locks using <code>fuser -s</code> (Linux/WSL) or <code>lsof</code> (macOS). If a running process has an open file descriptor on a log file, <code>zlog</code> automatically skips it to prevent pipe corruption.
-</details>
-
-<details>
-<summary><b>How do I read or search compressed logs later?</b></summary>
-<br>
-Use standard CLI tools:
-<ul>
-  <li><b>Read without decompressing:</b> <code>zcat file.log.gz</code></li>
-  <li><b>Search patterns:</b> <code>zgrep "error" file.log.gz</code></li>
-  <li><b>Decompress back to text:</b> <code>gzip -d file.log.gz</code></li>
-</ul>
-</details>
+- **Break chat history?** No. `transcript.jsonl` files excluded.
+- **Process safety?** `fuser -s` / `lsof` checks kernel locks. Open files skipped.
+- **Read `.gz` logs?** `zcat file.log.gz` to view, `zgrep "error" file.log.gz` to search.
 
 ---
 
