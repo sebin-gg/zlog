@@ -5,13 +5,13 @@ license: MIT
 compatibility: Linux, macOS, WSL, Windows 11 (Bash, Zsh, Git Bash, PowerShell)
 allowed-tools: Bash(*) Read Write
 metadata:
-  version: "9.1"
+  version: "9.2"
   registry: skills.sh
 ---
 
 # Zlog Multi-Instance Storage Optimizer
 
-Compress background tool logs across AI agents (~77%-99.9% space saved / up to 500x ratio with zstd/xz fallback). Purge 0-byte empty logs. Keep `transcript.jsonl` intact. Safe for concurrent running agents. Skip tiny logs (<10KB) and text docs. Handle symlinks cleanly.
+Compress background tool logs across AI agents (~77%-99.9% space saved / fast zstd -15 fallback). Purge 0-byte empty logs. Keep `transcript.jsonl` intact. Safe for concurrent running agents. Skip tiny logs (<10KB) and text docs. Handle symlinks cleanly.
 
 ## Execution Intents
 
@@ -33,7 +33,7 @@ Compress background tool logs across AI agents (~77%-99.9% space saved / up to 5
 for d in ~/.gemini ~/.agents ~/.config/Cursor ~/.cursor ~/.ollama ~/.claude ~/.config/claude-code ~/.aider ~/.continue ~/.codeium ~/.windsurf ~/.openhands ~/.codex ~/.cache/huggingface ~/.cache/lm-studio; do
   if [ -d "$d" ]; then
     find -L "$d" \( -name "*.log" -o -name "*.out" -o -name "*.trace" -o -name "*.txt" \) -empty -type f -delete 2>/dev/null || true
-    find -L "$d" \( -name "*.log" -o -name "*.out" -o -name "*.trace" -o -name "*.txt" \) -not -name "*.gz" -not -name "*.zst" -not -name "*.xz" -not -name "*.jsonl" -not -name "SKILL.md" -not -iname "README*" -not -iname "LICENSE*" -size +10k -mmin +1 -exec sh -c 'for f; do (command -v fuser >/dev/null 2>&1 && fuser -s "$f" 2>/dev/null) || (command -v lsof >/dev/null 2>&1 && lsof "$f" >/dev/null 2>&1) || (command -v zstd >/dev/null 2>&1 && zstd -19 -q --rm "$f") || (command -v xz >/dev/null 2>&1 && xz -9 "$f") || gzip -f "$f"; done' sh {} + 2>/dev/null || true
+    find -L "$d" \( -name "*.log" -o -name "*.out" -o -name "*.trace" -o -name "*.txt" \) -not -name "*.gz" -not -name "*.zst" -not -name "*.xz" -not -name "*.jsonl" -not -name "SKILL.md" -not -iname "README*" -not -iname "LICENSE*" -size +10k -mmin +1 -exec sh -c 'for f; do (command -v fuser >/dev/null 2>&1 && fuser -s "$f" 2>/dev/null) || (command -v lsof >/dev/null 2>&1 && lsof "$f" >/dev/null 2>&1) || (command -v zstd >/dev/null 2>&1 && zstd -15 -q --rm "$f") || (command -v xz >/dev/null 2>&1 && xz -9 "$f") || gzip -f "$f"; done' sh {} + 2>/dev/null || true
     [ ! -L "$d" ] && du -sh "$d" 2>/dev/null || true
   fi
 done
@@ -56,7 +56,7 @@ Get-ChildItem -Path "$env:USERPROFILE\.gemini","$env:USERPROFILE\.agents","$env:
 ### Deep Scan (On user request: "find new AI agents" / "scan disk")
 
 ```bash
-find -L ~ -maxdepth 4 \( -path "*/.gemini/*" -o -path "*/.agents/*" -o -path "*/.cursor/*" -o -path "*/.claude/*" -o -path "*/.ollama/*" -o -path "*/.aider/*" -o -path "*/.continue/*" -o -path "*/.windsurf/*" -o -path "*/.codeium/*" -o -path "*/.openhands/*" -o -path "*/.codex/*" -o -path "*/.lm-studio/*" -o -path "*/.huggingface/*" \) \( -name "*.log" -o -name "*.out" -o -name "*.trace" -o -name "*.txt" \) -not -name "*.gz" -not -name "*.zst" -not -name "*.xz" -not -name "*.jsonl" -not -name "SKILL.md" -not -iname "README*" -not -iname "LICENSE*" -size +10k -mmin +1 -exec sh -c 'for f; do (command -v fuser >/dev/null 2>&1 && fuser -s "$f" 2>/dev/null) || (command -v lsof >/dev/null 2>&1 && lsof "$f" >/dev/null 2>&1) || (command -v zstd >/dev/null 2>&1 && zstd -19 -q --rm "$f") || (command -v xz >/dev/null 2>&1 && xz -9 "$f") || gzip -f "$f"; done' sh {} + 2>/dev/null || true
+find -L ~ -maxdepth 4 \( -path "*/.gemini/*" -o -path "*/.agents/*" -o -path "*/.cursor/*" -o -path "*/.claude/*" -o -path "*/.ollama/*" -o -path "*/.aider/*" -o -path "*/.continue/*" -o -path "*/.windsurf/*" -o -path "*/.codeium/*" -o -path "*/.openhands/*" -o -path "*/.codex/*" -o -path "*/.lm-studio/*" -o -path "*/.huggingface/*" \) \( -name "*.log" -o -name "*.out" -o -name "*.trace" -o -name "*.txt" \) -not -name "*.gz" -not -name "*.zst" -not -name "*.xz" -not -name "*.jsonl" -not -name "SKILL.md" -not -iname "README*" -not -iname "LICENSE*" -size +10k -mmin +1 -exec sh -c 'for f; do (command -v fuser >/dev/null 2>&1 && fuser -s "$f" 2>/dev/null) || (command -v lsof >/dev/null 2>&1 && lsof "$f" >/dev/null 2>&1) || (command -v zstd >/dev/null 2>&1 && zstd -15 -q --rm "$f") || (command -v xz >/dev/null 2>&1 && xz -9 "$f") || gzip -f "$f"; done' sh {} + 2>/dev/null || true
 ```
 
 ## Helpers
