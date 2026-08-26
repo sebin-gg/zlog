@@ -41,9 +41,8 @@ done
 ### Dry-Run Mode (Preview Without Modifying Files)
 
 ```bash
-for d in ~/.gemini ~/.agents ~/.config/Cursor ~/.cursor ~/.ollama ~/.claude ~/.config/claude-code ~/.aider ~/.continue ~/.codeium ~/.windsurf ~/.openhands ~/.codex ~/.cache/huggingface ~/.cache/lm-studio; do
-  [ -d "$d" ] && find -L "$d" \( -name "*.log" -o -name "*.out" -o -name "*.trace" -o -name "*.txt" \) -not -name "*.gz" -not -name "*.jsonl" -not -name "SKILL.md" -not -iname "README*" -not -iname "LICENSE*" -size +10k -mmin +1 -exec echo "[DRY-RUN] Would compress:" {} + 2>/dev/null || true
-done
+ total=0; count=0; for d in ~/.gemini ~/.agents ~/.config/Cursor ~/.cursor ~/.ollama ~/.claude ~/.config/claude-code ~/.aider ~/.continue ~/.codeium ~/.windsurf ~/.openhands ~/.codex ~/.cache/huggingface ~/.cache/lm-studio; do
+  [ -d "$d" ] && find -L "$d" \( -name "*.log" -o -name "*.out" -o -name "*.trace" -o -name "*.txt" \) -not -name "*.gz" -not -name "*.jsonl" -not -name "SKILL.md" -not -iname "README*" -not -iname "LICENSE*" -size +10k -mmin +1 -exec sh -c 'for f; do s=$(stat -f%z "$f" 2>/dev/null || stat -c%s "$f" 2>/dev/null); sz=$(numfmt --to=iec $s 2>/dev/null || echo "${s}B"); echo "[DRY-RUN] Would compress: $f ($sz)"; total=$((total + s)); count=$((count + 1)); done' sh {} + 2>/dev/null || true; done; echo ""; echo "[DRY-RUN] Total: $count files, $(numfmt --to=iec $total 2>/dev/null || echo "${total}B") raw → ~$(numfmt --to=iec $((total / 4)) 2>/dev/null || echo "$((total / 4))B") compressed (est. 77% savings)"
 ```
 
 ### Windows 11 Native Compression (PowerShell - .zip)
