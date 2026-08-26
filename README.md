@@ -31,14 +31,14 @@
 
 ```mermaid
 graph TD
-    A[User / Wrap-up Trigger] --> B{Scan AI Agent Paths}
-    B --> C[~/.gemini, ~/.agents, ~/.config/Cursor, ~/.ollama, etc.]
-    C --> D{Process Lock Check}
-    D -- fuser / lsof detects active PID --E[Skip File - In-Flight Safety]
-    D -- No active process lock -- F{File Filters}
-    F -- *.jsonl / SKILL.md / README* / <10KB -- G[Skip File - Protected]
-    F -- *.log / *.out / *.txt / *.trace -- H[Compress to .gz / .zip]
-    H --> I[Report Total Disk Space Saved via du]
+    A["User / Wrap-up Trigger"] --> B{"Scan AI Agent Paths"}
+    B --> C["~/.gemini, ~/.agents, ~/.config/Cursor, ~/.ollama, etc."]
+    C --> D{"Process Lock Check"}
+    D -- "fuser / lsof detects active PID" --> E["Skip File - In-Flight Safety"]
+    D -- "No active process lock" --> F{"File Filters"}
+    F -- "*.jsonl / SKILL.md / README* / <10KB" --> G["Skip File - Protected"]
+    F -- "*.log / *.out / *.txt / *.trace" --> H["Compress to .gz / .zip"]
+    H --> I["Report Total Disk Space Saved via du"]
 ```
 
 ---
