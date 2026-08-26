@@ -11,7 +11,7 @@
   <a href="https://github.com/sebin-gg/zlog/stargazers"><img src="https://img.shields.io/github/stars/sebin-gg/zlog?style=social" alt="Stars"></a>
 </p>
 
-Compress background tool logs across 15+ AI agent runtimes. Save ~77% SSD space (4.3x compression ratio). Keep conversation transcripts 100% intact.
+Compress background tool logs across 16 AI agent runtimes. Save ~77% SSD space (4.3x compression ratio). Keep conversation transcripts 100% intact.
 
 ---
 
@@ -22,7 +22,7 @@ Compress background tool logs across 15+ AI agent runtimes. Save ~77% SSD space 
 - **Process Lock Safety**: Checks kernel locks via `fuser -s` (Linux/WSL) or `lsof` (macOS). Skips open files.
 - **In-Flight Guard**: Skips files modified <60 seconds ago (`-mmin +1`).
 - **Dry-Run Mode**: Preview space savings without touching files.
-- **15+ AI Agent Presets**: Auto-targets Antigravity, Gemini, Cursor, Claude Code, Ollama, Aider, Continue, Windsurf, Codeium, OpenHands, Codex, and Hugging Face.
+- **16 AI Agent Presets**: Auto-targets Antigravity, Gemini CLI, Global Agent Skills, Cursor, Claude Code, Ollama, Aider, Continue, Windsurf, Codeium, OpenHands, Codex, Hugging Face, and LM Studio.
 
 ---
 
@@ -68,22 +68,26 @@ graph TD
 
 ---
 
-## 🌐 Supported AI Agent Runtimes
+## 🌐 16 Supported AI Agent Runtimes
 
-| AI Agent / IDE | Default Path | OS Support |
-| :--- | :--- | :--- |
-| **Antigravity CLI** | `~/.gemini/antigravity-cli/logs/` | Linux, macOS, Windows 11 |
-| **Gemini CLI** | `~/.gemini/` | Linux, macOS, Windows 11 |
-| **Global Agent Skills** | `~/.agents/` | Linux, macOS, Windows 11 |
-| **Cursor IDE** | `~/.config/Cursor/` & `~/.cursor/` | Linux, macOS, Windows 11 |
-| **Claude Code** | `~/.claude/` & `~/.config/claude-code/` | Linux, macOS, Windows 11 |
-| **Ollama** | `~/.ollama/` & `~/.cache/ollama/` | Linux, macOS, Windows 11 |
-| **Aider AI** | `~/.aider/` | Linux, macOS, Windows 11 |
-| **Continue.dev** | `~/.continue/` | Linux, macOS, Windows 11 |
-| **Windsurf / Codeium** | `~/.windsurf/` & `~/.codeium/` | Linux, macOS, Windows 11 |
-| **OpenHands** | `~/.openhands/` | Linux, macOS, Windows 11 |
-| **Codex CLI** | `~/.codex/` | Linux, macOS, Windows 11 |
-| **LM Studio & Hugging Face** | `~/.cache/lm-studio/` & `~/.cache/huggingface/` | Linux, macOS, Windows 11 |
+| # | AI Agent / IDE | Default Path | OS Support |
+| :---: | :--- | :--- | :--- |
+| 1 | **Antigravity CLI** | `~/.gemini/antigravity-cli/logs/` | Linux, macOS, Windows 11 |
+| 2 | **Gemini CLI** | `~/.gemini/` | Linux, macOS, Windows 11 |
+| 3 | **Global Agent Skills** | `~/.agents/` | Linux, macOS, Windows 11 |
+| 4 | **Cursor IDE** | `~/.config/Cursor/` | Linux, macOS, Windows 11 |
+| 5 | **Cursor (Legacy)** | `~/.cursor/` | Linux, macOS, Windows 11 |
+| 6 | **Claude Code** | `~/.claude/` | Linux, macOS, Windows 11 |
+| 7 | **Claude Code Config** | `~/.config/claude-code/` | Linux, macOS, Windows 11 |
+| 8 | **Ollama** | `~/.ollama/` | Linux, macOS, Windows 11 |
+| 9 | **Aider AI** | `~/.aider/` | Linux, macOS, Windows 11 |
+| 10 | **Continue.dev** | `~/.continue/` | Linux, macOS, Windows 11 |
+| 11 | **Codeium** | `~/.codeium/` | Linux, macOS, Windows 11 |
+| 12 | **Windsurf** | `~/.windsurf/` | Linux, macOS, Windows 11 |
+| 13 | **OpenHands** | `~/.openhands/` | Linux, macOS, Windows 11 |
+| 14 | **Codex CLI** | `~/.codex/` | Linux, macOS, Windows 11 |
+| 15 | **Hugging Face** | `~/.cache/huggingface/` | Linux, macOS, Windows 11 |
+| 16 | **LM Studio** | `~/.cache/lm-studio/` | Linux, macOS, Windows 11 |
 
 ---
 
