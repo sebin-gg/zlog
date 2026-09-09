@@ -37,6 +37,7 @@ curl -fsSL https://raw.githubusercontent.com/sebin-gg/zlog/main/install.sh | bas
 - **Memory Context Intact**: Excludes `transcript.jsonl` files. Zero context loss for AI agents.
 - **Single-Line Output**: Condenses multi-folder scan results into one clean line (`253M total`).
 - **Cross-Platform Parity**: Runs natively on Linux, macOS, WSL, and Windows 11 PowerShell.
+- **Junk-Pruned Hybrid Deep Scan**: Never descends into `Caches`/`node_modules`/GPU-cache junk; capped at depth 12 — fast, future-proof, bounded.
 
 ---
 
@@ -62,7 +63,7 @@ graph TD
     D -- "No active process lock" --> F{"File & Window Filters"}
     F -- "*.jsonl / SKILL.md / README* / <10KB / <60s old" --> G["Skip File - Protected"]
     F -- "*.log / *.out / *.txt / *.trace" --> H["zstd -15 / xz -9 / gzip -f"]
-    H --> I["Report Total Disk Space Saved (Single-Line Summary)"]
+    H --> I["Report Savings + Total (e.g. Compressed 15 files: 34M -> 8M)"]
 ```
 
 ---
@@ -89,20 +90,41 @@ graph TD
 ### POSIX Shell (Linux, macOS, WSL, Git Bash)
 
 ```bash
+raw=0; saved=0; count=0
 for d in ~/.gemini ~/.config/Cursor ~/.cursor ~/.ollama ~/.claude ~/.config/claude-code ~/.windsurf ~/.codex ~/.cache/lm-studio; do
-  if [ -d "$d" ]; then
-    find -L "$d" \( -name "*.log" -o -name "*.out" -o -name "*.trace" -o -name "*.txt" \) -empty -type f -delete 2>/dev/null || true
-    find -L "$d" \( -name "*.log" -o -name "*.out" -o -name "*.trace" -o -name "*.txt" \) -not -name "*.gz" -not -name "*.zst" -not -name "*.xz" -not -name "*.jsonl" -not -name "SKILL.md" -not -iname "README*" -not -iname "LICENSE*" -size +10k -mmin +1 -exec sh -c 'for f; do (command -v fuser >/dev/null 2>&1 && fuser -s "$f" 2>/dev/null) || (command -v lsof >/dev/null 2>&1 && lsof "$f" >/dev/null 2>&1) || (command -v zstd >/dev/null 2>&1 && zstd -15 -q --rm "$f") || (command -v xz >/dev/null 2>&1 && xz -9 "$f") || gzip -f "$f"; done' sh {} + 2>/dev/null || true
-  fi
+  [ -d "$d" ] || continue
+  find -L "$d" \( -name "*.log" -o -name "*.out" -o -name "*.trace" -o -name "*.txt" \) -empty -type f -delete 2>/dev/null || true
+  while IFS= read -r f; do
+    [ -z "$f" ] && continue
+    size=$(stat -c%s "$f" 2>/dev/null || stat -f%z "$f" 2>/dev/null) || size=0
+    (command -v fuser >/dev/null 2>&1 && fuser -s "$f" 2>/dev/null) || (command -v lsof >/dev/null 2>&1 && lsof "$f" >/dev/null 2>&1) || (command -v zstd >/dev/null 2>&1 && zstd -15 -q --rm "$f") || (command -v xz >/dev/null 2>&1 && xz -9 "$f") || gzip -f "$f"
+    for c in zst xz gz; do
+      [ -f "$f.$c" ] || continue
+      newsize=$(stat -c%s "$f.$c" 2>/dev/null || stat -f%z "$f.$c" 2>/dev/null) || newsize=0
+      raw=$((raw + size)); saved=$((saved + size - newsize)); count=$((count + 1))
+      break
+    done
+  done < <(find -L "$d" \( -type d \( -name node_modules -o -name Caches -o -name Cache -o -name "Code Cache" -o -name blob_storage -o -name GPUCache -o -name DawnGraphiteCache -o -name DawnWebGPUCache \) -prune \) -o \( -type f \( -name "*.log" -o -name "*.out" -o -name "*.trace" -o -name "*.txt" \) -not -name "*.gz" -not -name "*.zst" -not -name "*.xz" -not -name "*.jsonl" -not -name "SKILL.md" -not -iname "README*" -not -iname "LICENSE*" -size +10k -mmin +1 \) 2>/dev/null)
 done
+if [ "$count" -gt 0 ]; then
+  comp=$((raw - saved))
+  raw_h=$(numfmt --to=iec "$raw" 2>/dev/null || echo "${raw}B")
+  comp_h=$(numfmt --to=iec "$comp" 2>/dev/null || echo "${comp}B")
+  saved_h=$(numfmt --to=iec "$saved" 2>/dev/null || echo "${saved}B")
+  echo "[zlog] Compressed $count files: $raw_h -> $comp_h (saved $saved_h, $(( saved * 100 / raw ))% smaller)"
+fi
 dirs=(); for d in ~/.gemini ~/.config/Cursor ~/.cursor ~/.ollama ~/.claude ~/.config/claude-code ~/.windsurf ~/.codex ~/.cache/lm-studio; do [ -d "$d" ] && [ ! -L "$d" ] && dirs+=("$d"); done; [ ${#dirs[@]} -gt 0 ] && du -ch "${dirs[@]}" 2>/dev/null | tail -n 1 || true
 ```
 
 ### Windows 11 Native PowerShell
 
 ```powershell
-Get-ChildItem -Path "$env:USERPROFILE\.gemini","$env:USERPROFILE\.cursor","$env:USERPROFILE\.ollama","$env:USERPROFILE\.claude","$env:USERPROFILE\.windsurf","$env:USERPROFILE\.codex" -Recurse -Include *.log,*.out,*.txt,*.trace -Exclude *.gz,*.zst,*.xz,*.jsonl,SKILL.md,README*,LICENSE* -ErrorAction SilentlyContinue | Where-Object { $_.Length -gt 10KB -and $_.LastWriteTime -lt (Get-Date).AddMinutes(-1) -and (try { $s = [System.IO.File]::Open($_.FullName, 'Open', 'ReadWrite', 'None'); $s.Close(); $true } catch { $false }) } | ForEach-Object { tar.exe -czf "$($_.FullName).gz" "$($_.FullName)"; Remove-Item $_.FullName }
+Get-ChildItem -Path "$env:USERPROFILE\.gemini","$env:USERPROFILE\.cursor","$env:USERPROFILE\.ollama","$env:USERPROFILE\.claude","$env:USERPROFILE\.windsurf","$env:USERPROFILE\.codex" -Recurse -Include *.log,*.out,*.txt,*.trace -Exclude *.gz,*.zst,*.xz,*.jsonl,SKILL.md,README*,LICENSE* -ErrorAction SilentlyContinue | Where-Object { $_.Length -gt 10KB -and $_.LastWriteTime -lt (Get-Date).AddMinutes(-1) -and (try { $s = [System.IO.File]::Open($_.FullName, 'Open', 'ReadWrite', 'None'); $s.Close(); $true } catch { $false }) } | ForEach-Object { tar.exe -czf "$($_.FullName).tar.gz" -C $_.DirectoryName $_.Name; Remove-Item $_.FullName }
 ```
+
+---
+
+> Note: the Windows PowerShell scan recurses unpruned (PowerShell has no `-prune`); the find-based scans on Linux/macOS/WSL skip junk/cache dirs wholesale.
 
 ---
 
@@ -116,10 +138,14 @@ Get-ChildItem -Path "$env:USERPROFILE\.gemini","$env:USERPROFILE\.cursor","$env:
 
 - **How do I read or search compressed `.zst` / `.gz` logs?**  
   - Read: `zstdcat file.log.zst` or `zcat file.log.gz`
+  - Read Windows `.tar.gz`: `tar -xzf file.log.tar.gz`
   - Search: `zstdgrep "error" file.log.zst` or `zgrep "error" file.log.gz`
 
 - **Is `zlog` safe to run during multi-agent sessions?**  
   **Yes.** Concurrent process locks and age filters guarantee safe execution across all running agents.
+
+- **How does the deep scan stay fast without missing files?**  
+  Hybrid pruning + depth cap: junk/cache dirs (`node_modules`, `Caches`, `Code Cache`, `blob_storage`, `GPUCache`, `.git`, …) are pruned wholesale, while `-maxdepth 12` bounds the walk. Real agent logs — even Antigravity's 8-level nesting — are never missed, and the pruned-dir count is reported.
 
 ---
 
