@@ -16,4 +16,4 @@ if ! head -1 "$SKILL_DIR/SKILL.md" | grep -q "^---$"; then
 fi
 
 echo "✓ zlog installed successfully to $SKILL_DIR/SKILL.md!"
-echo "Trigger in chat with: 'zlog', 'compress logs', or 'clean chat logs'."
+echo "Trigger in chat with: 'zlog', 'compress logs', 'clean up chat logs', 'pack logs', 'preview zlog', 'dry run', 'find new AI agents', or 'scan disk for hidden AI logs'."

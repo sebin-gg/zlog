@@ -34,14 +34,18 @@ curl -fsSL https://raw.githubusercontent.com/sebin-gg/zlog/main/install.sh | bas
 - **99.9% Storage Reclamation**: Uses `zstd -15` (or `xz -9` / `gzip`) to shrink 500MB logs down to **4KB**.
 - **0-Byte Log Purging**: Cleans dead empty files automatically.
 - **Process Lock Safe**: Checks kernel locks via `fuser -s` (Linux/WSL), `lsof` (macOS), or `[System.IO.File]::Open` (Windows 11). Never corrupts running agents.
+- **One Canonical Prune List**: Every POSIX snippet defines the junk-dir prune once as a `prune` array (`node_modules`, `Caches`, `Cache`, `Code Cache`, `blob_storage`, `GPUCache`, `DawnGraphiteCache`, `DawnWebGPUCache`, `.git`) and reuses it everywhere — standard scan, deep scan, and purge never diverge.
 - **Memory Context Intact**: Excludes `transcript.jsonl` files. Zero context loss for AI agents.
 - **Single-Line Output**: Condenses multi-folder scan results into one clean line (`253M total`).
 - **Cross-Platform Parity**: Runs natively on Linux, macOS, WSL, and Windows 11 PowerShell.
 - **Junk-Pruned Hybrid Deep Scan**: Never descends into `Caches`/`node_modules`/GPU-cache junk; capped at depth 12 — fast, future-proof, bounded.
+- **Windows 11 PowerShell Note**: The PowerShell variant recurses unpruned (no `-prune` equivalent); the find-based scans on Linux/macOS/WSL skip junk/cache dirs wholesale.
 
 ---
 
 ## 📊 Benchmark & Storage Savings
+
+Measured on a single 27 MB agent session log. Real-world scans across AI agent log dirs — mixed file types and sizes — land in the **77%–99.9% disk space saved** range quoted in the [skill description](SKILL.md); per-file ratios below show the algorithm ceilings.
 
 | Compression Algorithm | 27 MB Raw Agent Log | Storage Saved | Compression Ratio | CPU Overhead |
 | :--- | :--- | :--- | :--- | :--- |
@@ -82,6 +86,9 @@ graph TD
 | 8 | **Windsurf** | `~/.windsurf/` | Linux, macOS, Windows 11 |
 | 9 | **Codex CLI** | `~/.codex/` | Linux, macOS, Windows 11 |
 | 10 | **LM Studio** | `~/.cache/lm-studio/` | Linux, macOS, Windows 11 |
+| 11 | **LM Studio (Alt)** | `~/.lm-studio/` | Linux, macOS, WSL |
+
+> Note: `~/.lm-studio` is scanned as a legacy/alternate LM Studio layout and is not part of the Windows 11 PowerShell path list.
 
 ---
 
@@ -91,9 +98,10 @@ graph TD
 
 ```bash
 raw=0; saved=0; count=0
+prune=(-name node_modules -o -name Caches -o -name Cache -o -name "Code Cache" -o -name blob_storage -o -name GPUCache -o -name DawnGraphiteCache -o -name DawnWebGPUCache -o -name .git)
 for d in ~/.gemini ~/.config/Cursor ~/.cursor ~/.ollama ~/.claude ~/.config/claude-code ~/.windsurf ~/.codex ~/.cache/lm-studio ~/.lm-studio; do
   [ -d "$d" ] || continue
-  find -L "$d" \( -type d \( -name node_modules -o -name Caches -o -name Cache -o -name "Code Cache" -o -name blob_storage -o -name GPUCache -o -name DawnGraphiteCache -o -name DawnWebGPUCache \) -prune \) -o \( -type f \( -name "*.log" -o -name "*.out" -o -name "*.trace" -o -name "*.txt" \) -empty -exec rm -f {} + \) 2>/dev/null || true
+  find -L "$d" \( -type d \( "${prune[@]}" \) -prune \) -o \( -type f \( -name "*.log" -o -name "*.out" -o -name "*.trace" -o -name "*.txt" \) -empty -exec rm -f {} + \) 2>/dev/null || true
   while IFS= read -r -d '' f; do
     [ -z "$f" ] && continue
     size=$(stat -c%s "$f" 2>/dev/null || stat -f%z "$f" 2>/dev/null) || size=0
@@ -104,7 +112,7 @@ for d in ~/.gemini ~/.config/Cursor ~/.cursor ~/.ollama ~/.claude ~/.config/clau
       raw=$((raw + size)); saved=$((saved + size - newsize)); count=$((count + 1))
       break
     done
-  done < <(find -L "$d" \( -type d \( -name node_modules -o -name Caches -o -name Cache -o -name "Code Cache" -o -name blob_storage -o -name GPUCache -o -name DawnGraphiteCache -o -name DawnWebGPUCache \) -prune \) -o \( -type f \( -name "*.log" -o -name "*.out" -o -name "*.trace" -o -name "*.txt" \) -not -name "*.gz" -not -name "*.zst" -not -name "*.xz" -not -name "*.jsonl" -not -name "SKILL.md" -not -iname "README*" -not -iname "LICENSE*" -size +10k -mmin +1 -print0 \) 2>/dev/null)
+  done < <(find -L "$d" \( -type d \( "${prune[@]}" \) -prune \) -o \( -type f \( -name "*.log" -o -name "*.out" -o -name "*.trace" -o -name "*.txt" \) -not -name "*.gz" -not -name "*.zst" -not -name "*.xz" -not -name "*.jsonl" -not -name "SKILL.md" -not -iname "README*" -not -iname "LICENSE*" -size +10k -mmin +1 -print0 \) 2>/dev/null)
 done
 if [ "$count" -gt 0 ]; then
   comp=$((raw - saved))

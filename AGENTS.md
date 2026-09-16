@@ -1,16 +1,12 @@
 # AGENTS.md — zlog contributor workflow
 
-## PR workflow (mandatory for every PR)
+## Commit & merge workflow
 
-1. Work on a feature branch, never commit directly to `main`.
-2. Open a PR with test evidence in the body (repro before/after).
-3. Wait for reviewer comments, then address every comment with a new commit.
-4. Wait for the next review round. Repeat until all reviews are addressed.
-   If agent review capacity runs out with threads still unresolved, stop and
-   leave the PR open — capacity exhaustion never overrides rule 5.
-5. Never merge with unresolved review threads or failing checks.
+1. Verify before every commit (see below).
+2. Agent merges to `main` itself once verification passes — no review wait, no PR gate.
+3. After merge, report back to the user with what changed and the verification evidence.
 
-## Verification before every PR
+## Verification before every commit
 
 - `bash -n` on all bash snippets extracted from `SKILL.md` and `README.md`.
 - `bash -n install.sh` to verify installer syntax.
@@ -22,5 +18,5 @@
 ## Sync rule
 
 `SKILL.md` is the source of truth. Every snippet change must be mirrored
-in `README.md` (POSIX standard + PowerShell sections) in the same PR.
+in `README.md` (POSIX standard + PowerShell sections) in the same commit.
 The Dry-Run preview snippet lives only in `SKILL.md` and is exempt.
