@@ -128,6 +128,43 @@ Get-ChildItem -Path "$env:USERPROFILE\.gemini","$env:USERPROFILE\.cursor","$env:
 
 ---
 
+## 🎬 Demo
+
+### Live Terminal Recording
+
+```bash
+# Record your own demo with asciinema (recommended)
+asciinema rec zlog-demo.cast
+# ... run: zlog / curl install / npx skills add ...
+# Ctrl+D to stop
+asciinema upload zlog-demo.cast
+```
+
+### Preview (ASCII Animation)
+
+```
+┌─ zlog ────────────────────────────────────────────────────┐
+│ Scanning ~/.gemini, ~/.config/Cursor, ~/.claude, ...      │
+│ ████████████░░░░░░░░░░ 60%  (pruning node_modules...)     │
+│ ████████████████████ 100%                                 │
+│                                                           │
+│ [zlog] Compressed 23 files: 847M -> 12M (saved 835M,     │
+│         98.6% smaller)                                    │
+│                                                           │
+│ 1.2G total  (~/.gemini + ~/.config/Cursor + ~/.claude)   │
+└───────────────────────────────────────────────────────────┘
+```
+
+### Record & Share
+
+1. **Install asciinema**: `pipx install asciinema` / `brew install asciinema` / `choco install asciinema`
+2. **Record**: `asciinema rec zlog-demo.cast`
+3. **Run zlog**: trigger via your agent or run the one-liner
+4. **Upload**: `asciinema upload zlog-demo.cast`
+5. **Embed**: Paste the URL in issues, discussions, or social posts
+
+---
+
 ## ❓ FAQ
 
 - **Does `zlog` break chat history?**  
