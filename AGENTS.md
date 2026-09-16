@@ -13,6 +13,7 @@
 ## Verification before every PR
 
 - `bash -n` on all bash snippets extracted from `SKILL.md` and `README.md`.
+- `bash -n install.sh` to verify installer syntax.
 - Frontmatter check: `SKILL.md` must start with `---` and contain
   `name`, `description`, `license`, `compatibility`, `allowed-tools`.
 - Functional repro of the changed `find` logic in `/tmp` (pruned dirs must
