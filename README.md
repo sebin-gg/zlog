@@ -91,7 +91,7 @@ graph TD
 
 ```bash
 raw=0; saved=0; count=0
-for d in ~/.gemini ~/.config/Cursor ~/.cursor ~/.ollama ~/.claude ~/.config/claude-code ~/.windsurf ~/.codex ~/.cache/lm-studio; do
+for d in ~/.gemini ~/.config/Cursor ~/.cursor ~/.ollama ~/.claude ~/.config/claude-code ~/.windsurf ~/.codex ~/.cache/lm-studio ~/.lm-studio; do
   [ -d "$d" ] || continue
   find -L "$d" \( -type d \( -name node_modules -o -name Caches -o -name Cache -o -name "Code Cache" -o -name blob_storage -o -name GPUCache -o -name DawnGraphiteCache -o -name DawnWebGPUCache \) -prune \) -o \( -type f \( -name "*.log" -o -name "*.out" -o -name "*.trace" -o -name "*.txt" \) -empty -exec rm -f {} + \) 2>/dev/null || true
   while IFS= read -r -d '' f; do
@@ -108,18 +108,18 @@ for d in ~/.gemini ~/.config/Cursor ~/.cursor ~/.ollama ~/.claude ~/.config/clau
 done
 if [ "$count" -gt 0 ]; then
   comp=$((raw - saved))
-  raw_h=$(numfmt --to=iec "$raw" 2>/dev/null || echo "${raw}B")
-  comp_h=$(numfmt --to=iec "$comp" 2>/dev/null || echo "${comp}B")
-  saved_h=$(numfmt --to=iec "$saved" 2>/dev/null || echo "${saved}B")
+  raw_h=$(echo "$raw" | awk '{if($1>=1073741824)printf "%.1fG",$1/1073741824;else if($1>=1048576)printf "%.1fM",$1/1048576;else if($1>=1024)printf "%.1fK",$1/1024;else printf "%dB",$1}')
+  comp_h=$(echo "$comp" | awk '{if($1>=1073741824)printf "%.1fG",$1/1073741824;else if($1>=1048576)printf "%.1fM",$1/1048576;else if($1>=1024)printf "%.1fK",$1/1024;else printf "%dB",$1}')
+  saved_h=$(echo "$saved" | awk '{if($1>=1073741824)printf "%.1fG",$1/1073741824;else if($1>=1048576)printf "%.1fM",$1/1048576;else if($1>=1024)printf "%.1fK",$1/1024;else printf "%dB",$1}')
   echo "[zlog] Compressed $count files: $raw_h -> $comp_h (saved $saved_h, $(( saved * 100 / raw ))% smaller)"
 fi
-dirs=(); for d in ~/.gemini ~/.config/Cursor ~/.cursor ~/.ollama ~/.claude ~/.config/claude-code ~/.windsurf ~/.codex ~/.cache/lm-studio; do [ -d "$d" ] && [ ! -L "$d" ] && dirs+=("$d"); done; [ ${#dirs[@]} -gt 0 ] && du -ch "${dirs[@]}" 2>/dev/null | tail -n 1 || true
+dirs=(); for d in ~/.gemini ~/.config/Cursor ~/.cursor ~/.ollama ~/.claude ~/.config/claude-code ~/.windsurf ~/.codex ~/.cache/lm-studio ~/.lm-studio; do [ -d "$d" ] && [ ! -L "$d" ] && dirs+=("$d"); done; [ ${#dirs[@]} -gt 0 ] && du -ch "${dirs[@]}" 2>/dev/null | tail -n 1 || true
 ```
 
 ### Windows 11 Native PowerShell
 
 ```powershell
-Get-ChildItem -Path "$env:USERPROFILE\.gemini","$env:USERPROFILE\.cursor","$env:USERPROFILE\.ollama","$env:USERPROFILE\.claude","$env:USERPROFILE\.windsurf","$env:USERPROFILE\.codex" -Recurse -Include *.log,*.out,*.txt,*.trace -Exclude *.gz,*.zst,*.xz,*.jsonl,SKILL.md,README*,LICENSE* -ErrorAction SilentlyContinue | Where-Object { $_.Length -gt 10KB -and $_.LastWriteTime -lt (Get-Date).AddMinutes(-1) -and (try { $s = [System.IO.File]::Open($_.FullName, 'Open', 'ReadWrite', 'None'); $s.Close(); $true } catch { $false }) } | ForEach-Object { tar.exe -czf "$($_.FullName).tar.gz" -C $_.DirectoryName $_.Name; if ($LASTEXITCODE -eq 0 -and (Test-Path "$($_.FullName).tar.gz")) { Remove-Item $_.FullName } }
+Get-ChildItem -Path "$env:USERPROFILE\.gemini","$env:USERPROFILE\.cursor","$env:USERPROFILE\.ollama","$env:USERPROFILE\.claude","$env:USERPROFILE\.config\claude-code","$env:USERPROFILE\.windsurf","$env:USERPROFILE\.codex","$env:USERPROFILE\.cache\lm-studio" -Recurse -Include *.log,*.out,*.txt,*.trace -Exclude *.gz,*.zst,*.xz,*.jsonl,SKILL.md,README*,LICENSE* -ErrorAction SilentlyContinue | Where-Object { $_.Length -gt 10KB -and $_.LastWriteTime -lt (Get-Date).AddMinutes(-1) -and (try { $s = [System.IO.File]::Open($_.FullName, 'Open', 'ReadWrite', 'None'); $s.Close(); $true } catch { $false }) } | ForEach-Object { tar.exe -czf "$($_.FullName).tar.gz" -C $_.DirectoryName $_.Name; if ($LASTEXITCODE -eq 0 -and (Test-Path "$($_.FullName).tar.gz")) { Remove-Item $_.FullName } }
 ```
 
 ---
@@ -140,20 +140,14 @@ asciinema rec zlog-demo.cast
 asciinema upload zlog-demo.cast
 ```
 
-### Preview (ASCII Animation)
+### Actual Output (what you'll see when you run it)
 
 ```
-┌─ zlog ────────────────────────────────────────────────────┐
-│ Scanning ~/.gemini, ~/.config/Cursor, ~/.claude, ...      │
-│ ████████████░░░░░░░░░░ 60%  (pruning node_modules...)     │
-│ ████████████████████ 100%                                 │
-│                                                           │
-│ [zlog] Compressed 23 files: 847M -> 12M (saved 835M,     │
-│         98.6% smaller)                                    │
-│                                                           │
-│ 1.2G total  (~/.gemini + ~/.config/Cursor + ~/.claude)   │
-└───────────────────────────────────────────────────────────┘
+[zlog] Compressed 23 files: 847M -> 12M (saved 835M, 98% smaller)
+1.2G    total
 ```
+
+The output is a single summary line: file count, raw → compressed, savings percentage, and total directory size. No progress bars — just fast, clean results.
 
 ### Record & Share
 
