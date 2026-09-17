@@ -82,13 +82,13 @@ graph TD
 | 4 | **Cursor (Legacy)** | `~/.cursor/` | Linux, macOS, Windows 11 |
 | 5 | **Claude Code** | `~/.claude/` | Linux, macOS, Windows 11 |
 | 6 | **Claude Code Config** | `~/.config/claude-code/` | Linux, macOS, Windows 11 |
-| 7 | **Ollama** | `~/.ollama/` | Linux, macOS, Windows 11 |
+| 7 | **Ollama** | `~/.ollama/` · `%LOCALAPPDATA%\Ollama\` (Windows app/server logs) | Linux, macOS, Windows 11 |
 | 8 | **Windsurf** | `~/.windsurf/` · `~/.config/Windsurf/` (Linux) · `~/Library/Application Support/Windsurf/` (macOS) · `%APPDATA%\Windsurf\` (Windows) | Linux, macOS, Windows 11 |
 | 9 | **Codex CLI** | `~/.codex/` | Linux, macOS, Windows 11 |
-| 10 | **LM Studio** | `~/.cache/lm-studio/` | Linux, macOS, Windows 11 |
-| 11 | **LM Studio (Alt)** | `~/.lm-studio/` | Linux, macOS, WSL |
+| 10 | **LM Studio** | `~/.cache/lm-studio/` (older layout) | Linux, macOS, Windows 11 |
+| 11 | **LM Studio** | `~/.lm-studio/` (current layout) | Linux, macOS, WSL, Windows 11 |
 
-> Note: `~/.lm-studio` is scanned as a legacy/alternate LM Studio layout and is not part of the Windows 11 PowerShell path list.
+> Note: both LM Studio layouts (`~/.cache/lm-studio` and `~/.lm-studio`) are scanned on all platforms including the Windows 11 PowerShell path list.
 
 ---
 
@@ -99,7 +99,7 @@ graph TD
 ```bash
 raw=0; saved=0; count=0
 prune=(-name node_modules -o -name Caches -o -name Cache -o -name "Code Cache" -o -name blob_storage -o -name GPUCache -o -name DawnGraphiteCache -o -name DawnWebGPUCache -o -name .git)
-for d in ~/.gemini ~/.config/Cursor "$HOME/Library/Application Support/Cursor" ~/.cursor ~/.ollama ~/.claude ~/.config/claude-code ~/.windsurf ~/.config/Windsurf "$HOME/Library/Application Support/Windsurf" ~/.codex ~/.cache/lm-studio ~/.lm-studio; do
+for d in ~/.gemini ~/.config/Cursor "$HOME/Library/Application Support/Cursor" ~/.cursor ~/.ollama "$HOME/AppData/Local/Ollama" ~/.claude ~/.config/claude-code ~/.windsurf ~/.config/Windsurf "$HOME/Library/Application Support/Windsurf" ~/.codex ~/.cache/lm-studio ~/.lm-studio; do
   [ -d "$d" ] || continue
   find -L "$d" \( -type d \( "${prune[@]}" \) -prune \) -o \( -type f \( -name "*.log" -o -name "*.out" -o -name "*.trace" -o -name "*.txt" \) -empty -exec rm -f {} + \) 2>/dev/null || true
   while IFS= read -r -d '' f; do
@@ -122,13 +122,13 @@ if [ "$count" -gt 0 ]; then
   pct=0; [ "$raw" -gt 0 ] && pct=$(( saved * 100 / raw ))
   echo "[zlog] Compressed $count files: $raw_h -> $comp_h (saved $saved_h, $pct% smaller)"
 fi
-dirs=(); for d in ~/.gemini ~/.config/Cursor "$HOME/Library/Application Support/Cursor" ~/.cursor ~/.ollama ~/.claude ~/.config/claude-code ~/.windsurf ~/.config/Windsurf "$HOME/Library/Application Support/Windsurf" ~/.codex ~/.cache/lm-studio ~/.lm-studio; do [ -d "$d" ] && [ ! -L "$d" ] && dirs+=("$d"); done; [ ${#dirs[@]} -gt 0 ] && du -ch "${dirs[@]}" 2>/dev/null | tail -n 1 || true
+dirs=(); for d in ~/.gemini ~/.config/Cursor "$HOME/Library/Application Support/Cursor" ~/.cursor ~/.ollama "$HOME/AppData/Local/Ollama" ~/.claude ~/.config/claude-code ~/.windsurf ~/.config/Windsurf "$HOME/Library/Application Support/Windsurf" ~/.codex ~/.cache/lm-studio ~/.lm-studio; do [ -d "$d" ] && [ ! -L "$d" ] && dirs+=("$d"); done; [ ${#dirs[@]} -gt 0 ] && du -ch "${dirs[@]}" 2>/dev/null | tail -n 1 || true
 ```
 
 ### Windows 11 Native PowerShell
 
 ```powershell
-$zlogPaths = "$env:USERPROFILE\.gemini","$env:APPDATA\Cursor","$env:USERPROFILE\.config\Cursor","$env:USERPROFILE\.cursor","$env:USERPROFILE\.ollama","$env:USERPROFILE\.claude","$env:USERPROFILE\.config\claude-code","$env:USERPROFILE\.windsurf","$env:APPDATA\Windsurf","$env:USERPROFILE\.config\Windsurf","$env:USERPROFILE\.codex","$env:USERPROFILE\.cache\lm-studio"
+$zlogPaths = "$env:USERPROFILE\.gemini","$env:APPDATA\Cursor","$env:USERPROFILE\.config\Cursor","$env:USERPROFILE\.cursor","$env:USERPROFILE\.ollama","$env:LOCALAPPDATA\Ollama","$env:USERPROFILE\.claude","$env:USERPROFILE\.config\claude-code","$env:USERPROFILE\.windsurf","$env:APPDATA\Windsurf","$env:USERPROFILE\.config\Windsurf","$env:USERPROFILE\.codex","$env:USERPROFILE\.cache\lm-studio","$env:USERPROFILE\.lm-studio"
 $junk = '\node_modules\','\Caches\','\Cache\','\Code Cache\','\blob_storage\','\GPUCache\','\DawnGraphiteCache\','\DawnWebGPUCache\','\.git\'
 function zlogFmt($b) { if ($b -ge 1073741824) { "{0:N1}G" -f ($b/1073741824) } elseif ($b -ge 1048576) { "{0:N1}M" -f ($b/1048576) } elseif ($b -ge 1024) { "{0:N1}K" -f ($b/1024) } else { "${b}B" } }
 Get-ChildItem -Path $zlogPaths -Recurse -Include *.log,*.out,*.txt,*.trace -Exclude *.gz,*.zst,*.xz,*.jsonl,SKILL.md,README*,LICENSE* -ErrorAction SilentlyContinue | Where-Object { $p = $_.FullName; $_.Length -eq 0 -and -not ($junk | Where-Object { $p -like "*$_*" }) } | Remove-Item -Force -ErrorAction SilentlyContinue
@@ -155,7 +155,7 @@ asciinema rec zlog-demo.cast
 asciinema upload zlog-demo.cast
 ```
 
-### Actual Output (what you'll see when you run it)
+### Example Output (illustrative — exact numbers vary by machine)
 
 ```
 [zlog] Compressed 23 files: 847M -> 12M (saved 835M, 98% smaller)
