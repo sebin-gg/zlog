@@ -3,10 +3,11 @@
 set -e
 
 TARGETS="$HOME/.agents/skills/zlog $HOME/.claude/skills/zlog $HOME/.gemini/skills/zlog"
+ZLOG_REF="${ZLOG_REF:-main}"
 TMP_FILE="$(mktemp)"
 
-echo "Downloading latest zlog SKILL.md..."
-curl -fsSL https://raw.githubusercontent.com/sebin-gg/zlog/main/SKILL.md -o "$TMP_FILE"
+echo "Downloading zlog SKILL.md (ref: $ZLOG_REF)..."
+curl -fsSL "https://raw.githubusercontent.com/sebin-gg/zlog/$ZLOG_REF/SKILL.md" -o "$TMP_FILE"
 
 # Verify download is valid SKILL.md
 if ! head -1 "$TMP_FILE" | grep -q "^---$"; then
@@ -17,6 +18,9 @@ fi
 
 for SKILL_DIR in $TARGETS; do
   mkdir -p "$SKILL_DIR"
+  if [ -f "$SKILL_DIR/SKILL.md" ]; then
+    cp "$SKILL_DIR/SKILL.md" "$SKILL_DIR/SKILL.md.bak"
+  fi
   cp "$TMP_FILE" "$SKILL_DIR/SKILL.md"
   echo "✓ installed to $SKILL_DIR/SKILL.md"
 done
