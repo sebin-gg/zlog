@@ -78,6 +78,46 @@ jobs:
               sys.exit(1)
           print("✓ SKILL.md POSIX snippet mirrored in README.md (sync rule OK)")
           '
+      - name: Sync check — SKILL.md PowerShell snippet mirrored verbatim in README.md
+        run: |
+          python3 -c '
+          import re, sys
+          with open("SKILL.md") as f:
+              skill = f.read()
+          with open("README.md") as f:
+              readme = f.read()
+          m = re.search(r"^```powershell$\n(.*?)^```$", skill, re.M | re.S)
+          if not m:
+              print("Error: PowerShell snippet not found in SKILL.md")
+              sys.exit(1)
+          snippet = m.group(1)
+          if snippet not in readme:
+              print("Error: SKILL.md PowerShell snippet not mirrored verbatim in README.md (sync rule violated)")
+              sys.exit(1)
+          print("✓ SKILL.md PowerShell snippet mirrored in README.md (sync rule OK)")
+          '
+      - name: Prune parity — all prune=(...) lists identical
+        run: |
+          python3 -c '
+          import re, sys
+          def prunes(path):
+              text = open(path).read()
+              return [" ".join(p.split()) for p in re.findall(r"prune=\((-name.*?)\)", text, re.S)]
+          skill = prunes("SKILL.md")
+          readme = prunes("README.md")
+          allp = skill + readme
+          if not allp:
+              print("Error: no prune=(...) lists found")
+              sys.exit(1)
+          uniq = set(allp)
+          print(f"SKILL.md: {len(skill)} prune list(s), README.md: {len(readme)} prune list(s), unique: {len(uniq)}")
+          if len(uniq) != 1:
+              print("Error: prune lists diverge across snippets/files:")
+              for u in sorted(uniq):
+                  print(f"  - {u}")
+              sys.exit(1)
+          print("✓ all prune lists identical (parity OK)")
+          '
       - name: PowerShell snippet parse check
         shell: pwsh
         run: |

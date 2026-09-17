@@ -2,18 +2,23 @@
 # zlog skill installer for Antigravity, Gemini CLI, Cursor, Claude Code, and Global Agents
 set -e
 
-SKILL_DIR="$HOME/.agents/skills/zlog"
-mkdir -p "$SKILL_DIR"
+TARGETS="$HOME/.agents/skills/zlog $HOME/.claude/skills/zlog $HOME/.gemini/skills/zlog"
+TMP_FILE="$(mktemp)"
 
 echo "Downloading latest zlog SKILL.md..."
-curl -fsSL https://raw.githubusercontent.com/sebin-gg/zlog/main/SKILL.md -o "$SKILL_DIR/SKILL.md"
+curl -fsSL https://raw.githubusercontent.com/sebin-gg/zlog/main/SKILL.md -o "$TMP_FILE"
 
 # Verify download is valid SKILL.md
-if ! head -1 "$SKILL_DIR/SKILL.md" | grep -q "^---$"; then
+if ! head -1 "$TMP_FILE" | grep -q "^---$"; then
   echo "Error: Downloaded file is not valid SKILL.md (missing frontmatter)"
-  rm -f "$SKILL_DIR/SKILL.md"
+  rm -f "$TMP_FILE"
   exit 1
 fi
 
-echo "✓ zlog installed successfully to $SKILL_DIR/SKILL.md!"
+for SKILL_DIR in $TARGETS; do
+  mkdir -p "$SKILL_DIR"
+  cp "$TMP_FILE" "$SKILL_DIR/SKILL.md"
+  echo "✓ installed to $SKILL_DIR/SKILL.md"
+done
+rm -f "$TMP_FILE"
 echo "Trigger in chat with: 'zlog', 'compress logs', 'clean up chat logs', 'pack logs', 'preview zlog', 'dry run', 'find new AI agents', or 'scan disk for hidden AI logs'."
