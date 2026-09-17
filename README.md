@@ -7,11 +7,11 @@
   <a href="https://skills.sh"><img src="https://img.shields.io/badge/registry-skills.sh-purple" alt="Registry"></a>
   <a href="https://github.com/sebin-gg/zlog/actions"><img src="https://github.com/sebin-gg/zlog/actions/workflows/validate.yml/badge.svg" alt="Validate"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="License"></a>
-  <a href="#compatibility"><img src="https://img.shields.io/badge/compatibility-Linux%20%7C%20macOS%20%7C%20Windows%2011-success" alt="Compatibility"></a>
+  <a href="#compatibility"><img src="https://img.shields.io/badge/compatibility-Linux%20tested-success" alt="Compatibility"></a>
   <a href="https://github.com/sebin-gg/zlog/stargazers"><img src="https://img.shields.io/github/stars/sebin-gg/zlog?style=social" alt="Stars"></a>
 </p>
 
-> **The universal zero-config log compressor for AI agent developers.** Reclaim **77% to 99.9% SSD space** across Cursor, Claude Code, Antigravity, Ollama & Windsurf while keeping 100% of conversation transcripts intact.
+> **The zero-config log compressor for AI agent developers.** Compresses session logs across Cursor, Claude Code, Antigravity, Ollama & Windsurf while skipping conversation transcripts. Tested on Linux; macOS, WSL, and Windows 11 snippets ship untested.
 
 ---
 
@@ -22,7 +22,7 @@
 npx skills add sebin-gg/zlog
 ```
 
-### via Universal Shell Script
+### via Shell Script
 ```bash
 curl -fsSL https://raw.githubusercontent.com/sebin-gg/zlog/main/install.sh | bash
 ```
@@ -31,28 +31,21 @@ curl -fsSL https://raw.githubusercontent.com/sebin-gg/zlog/main/install.sh | bas
 
 ## ⚡ Key Highlights
 
-- **99.9% Storage Reclamation**: Uses `zstd -15` (or `xz -9` / `gzip`) to shrink 500MB logs down to **4KB**.
+- **High-Ratio Compression**: Tries `zstd -15`, falls back to `xz -9` / `gzip`. Reports per-run savings with a single summary line.
 - **0-Byte Log Purging**: Cleans dead empty files automatically.
-- **Process Lock Safe**: Checks kernel locks via `fuser -s` (Linux/WSL), `lsof` (macOS), or `[System.IO.File]::Open` (Windows 11). Never corrupts running agents.
+- **Process Lock Checks**: Checks kernel locks via `fuser -s` (Linux/WSL), `lsof` (macOS), or `[System.IO.File]::Open` (Windows 11). Files with active locks are skipped; the macOS/Windows paths are not runtime-tested.
 - **One Canonical Prune List**: Every POSIX snippet defines the junk-dir prune once as a `prune` array (`node_modules`, `Caches`, `Cache`, `Code Cache`, `blob_storage`, `GPUCache`, `DawnGraphiteCache`, `DawnWebGPUCache`, `.git`) and reuses it everywhere — standard scan, deep scan, and purge never diverge.
-- **Memory Context Intact**: Excludes `transcript.jsonl` files. Zero context loss for AI agents.
-- **Single-Line Output**: Condenses multi-folder scan results into one clean line (`253M total`).
-- **Cross-Platform Parity**: Runs natively on Linux, macOS, WSL, and Windows 11 PowerShell.
-- **Junk-Pruned Hybrid Deep Scan**: Never descends into `Caches`/`node_modules`/GPU-cache junk; capped at depth 12 — fast, future-proof, bounded.
+- **Memory Context Intact**: Excludes `transcript.jsonl` files by filter.
+- **Single-Line Output**: Condenses multi-folder scan results into one clean line.
+- **Linux Tested**: Runs on Linux (Bash, Zsh). macOS, WSL, and Windows 11 PowerShell snippets ship untested.
+- **Junk-Pruned Hybrid Deep Scan**: Skips `Caches`/`node_modules`/GPU-cache junk via prune; capped at depth 12 to bound the walk.
 - **Windows 11 PowerShell Note**: The PowerShell variant recurses unpruned (no `-prune` equivalent) but filters out any file whose path contains a junk-dir segment (`\node_modules\`, `\Caches\`, `\Cache\`, `\Code Cache\`, `\blob_storage\`, `\GPUCache\`, `\DawnGraphiteCache\`, `\DawnWebGPUCache\`, `\.git\`) — matching the POSIX prune list; the find-based scans on Linux/macOS/WSL skip those dirs wholesale. It purges 0-byte logs first, then reports the same single-line summary.
 
 ---
 
-## 📊 Benchmark & Storage Savings
+## 📊 Storage Savings
 
-Measured on a single 27 MB agent session log. Real-world scans across AI agent log dirs — mixed file types and sizes — land in the **77%–99.9% disk space saved** range quoted in the [skill description](SKILL.md); per-file ratios below show the algorithm ceilings.
-
-| Compression Algorithm | 27 MB Raw Agent Log | Storage Saved | Compression Ratio | CPU Overhead |
-| :--- | :--- | :--- | :--- | :--- |
-| **Raw Uncompressed** | 27.08 MB | 0% | 1.0x | None |
-| **Standard Gzip (`.gz`)** | 0.12 MB | **99.6%** | **225x** | Fast |
-| **Zstandard (`zstd -15`)** | **0.0048 MB (4.8 KB)** | **99.98%** | **5,641x** | Ultra-Fast |
-| **LZMA2 (`xz -9`)** | **0.0032 MB (3.2 KB)** | **99.99%** | **8,462x** | Moderate |
+Savings depend on log content (repetitive text compresses best). Run the Dry-Run preview for your own numbers — the skill reports per-run raw → compressed totals.
 
 ---
 
@@ -74,19 +67,21 @@ graph TD
 
 ## 🌐 Supported AI Agent Runtimes
 
-| # | AI Agent / IDE | Default Log Directory | OS Parity |
+| # | AI Agent / IDE | Default Log Directory | Tested |
 | :---: | :--- | :--- | :--- |
-| 1 | **Antigravity CLI** | `~/.gemini/antigravity-cli/logs/` | Linux, macOS, Windows 11 |
-| 2 | **Gemini CLI** | `~/.gemini/` | Linux, macOS, Windows 11 |
-| 3 | **Cursor IDE** | `~/.config/Cursor/` · `~/Library/Application Support/Cursor/` (macOS) · `%APPDATA%\Cursor\` (Windows) | Linux, macOS, Windows 11 |
-| 4 | **Cursor (Legacy)** | `~/.cursor/` | Linux, macOS, Windows 11 |
-| 5 | **Claude Code** | `~/.claude/` | Linux, macOS, Windows 11 |
-| 6 | **Claude Code Config** | `~/.config/claude-code/` | Linux, macOS, Windows 11 |
-| 7 | **Ollama** | `~/.ollama/` · `%LOCALAPPDATA%\Ollama\` (Windows app/server logs) | Linux, macOS, Windows 11 |
-| 8 | **Windsurf** | `~/.windsurf/` · `~/.config/Windsurf/` (Linux) · `~/Library/Application Support/Windsurf/` (macOS) · `%APPDATA%\Windsurf\` (Windows) | Linux, macOS, Windows 11 |
-| 9 | **Codex CLI** | `~/.codex/` | Linux, macOS, Windows 11 |
-| 10 | **LM Studio** | `~/.cache/lm-studio/` (older layout) | Linux, macOS, Windows 11 |
-| 11 | **LM Studio** | `~/.lm-studio/` (current layout) | Linux, macOS, WSL, Windows 11 |
+| 1 | **Antigravity CLI** | `~/.gemini/antigravity-cli/logs/` | Linux |
+| 2 | **Gemini CLI** | `~/.gemini/` | Linux |
+| 3 | **Cursor IDE** | `~/.config/Cursor/` · `~/Library/Application Support/Cursor/` (macOS) · `%APPDATA%\Cursor\` (Windows) | Linux |
+| 4 | **Cursor (Legacy)** | `~/.cursor/` | Linux |
+| 5 | **Claude Code** | `~/.claude/` | Linux |
+| 6 | **Claude Code Config** | `~/.config/claude-code/` | Linux |
+| 7 | **Ollama** | `~/.ollama/` · `%LOCALAPPDATA%\Ollama\` (Windows app/server logs) | Linux |
+| 8 | **Windsurf** | `~/.windsurf/` · `~/.config/Windsurf/` (Linux) · `~/Library/Application Support/Windsurf/` (macOS) · `%APPDATA%\Windsurf\` (Windows) | Linux |
+| 9 | **Codex CLI** | `~/.codex/` | Linux |
+| 10 | **LM Studio** | `~/.cache/lm-studio/` (older layout) | Linux |
+| 11 | **LM Studio** | `~/.lm-studio/` (current layout) | Linux |
+
+> Note: paths verified against vendor docs; only Linux is runtime-tested. macOS, WSL, and Windows 11 snippets ship untested.
 
 > Note: both LM Studio layouts (`~/.cache/lm-studio` and `~/.lm-studio`) are scanned on all platforms including the Windows 11 PowerShell path list.
 
@@ -94,7 +89,7 @@ graph TD
 
 ## 💻 One-Line Command Snippets
 
-### POSIX Shell (Linux, macOS, WSL, Git Bash)
+### POSIX Shell (tested on Linux)
 
 ```bash
 raw=0; saved=0; count=0
@@ -125,7 +120,7 @@ fi
 dirs=(); for d in ~/.gemini ~/.config/Cursor "$HOME/Library/Application Support/Cursor" ~/.cursor ~/.ollama "$HOME/AppData/Local/Ollama" ~/.claude ~/.config/claude-code ~/.windsurf ~/.config/Windsurf "$HOME/Library/Application Support/Windsurf" ~/.codex ~/.cache/lm-studio ~/.lm-studio; do [ -d "$d" ] && [ ! -L "$d" ] && dirs+=("$d"); done; [ ${#dirs[@]} -gt 0 ] && du -ch "${dirs[@]}" 2>/dev/null | tail -n 1 || true
 ```
 
-### Windows 11 Native PowerShell
+### Windows 11 PowerShell (not runtime-tested)
 
 ```powershell
 $zlogPaths = "$env:USERPROFILE\.gemini","$env:APPDATA\Cursor","$env:USERPROFILE\.config\Cursor","$env:USERPROFILE\.cursor","$env:USERPROFILE\.ollama","$env:LOCALAPPDATA\Ollama","$env:USERPROFILE\.claude","$env:USERPROFILE\.config\claude-code","$env:USERPROFILE\.windsurf","$env:APPDATA\Windsurf","$env:USERPROFILE\.config\Windsurf","$env:USERPROFILE\.codex","$env:USERPROFILE\.cache\lm-studio","$env:USERPROFILE\.lm-studio"
@@ -139,7 +134,7 @@ if ($count -gt 0) { $comp=$raw-$saved; $pct=0; if ($raw -gt 0) { $pct=[math]::Fl
 
 ---
 
-> Note: the Windows PowerShell scan recurses unpruned (PowerShell has no `-prune`) but applies the same junk-dir path-segment filter as the POSIX prune list; the find-based scans on Linux/macOS/WSL skip those dirs wholesale. It purges 0-byte logs first, then reports the same single-line summary.
+> Note: the Windows PowerShell scan recurses unpruned (PowerShell has no `-prune`) but applies the same junk-dir path-segment filter as the POSIX prune list; the find-based scans skip those dirs wholesale. It purges 0-byte logs first, then reports the same single-line summary. Neither variant is runtime-tested on Windows.
 
 ---
 
@@ -162,7 +157,7 @@ asciinema upload zlog-demo.cast
 1.2G    total
 ```
 
-The output is a single summary line: file count, raw → compressed, savings percentage, and total directory size. No progress bars — just fast, clean results.
+The output is a single summary line: file count, raw → compressed, savings percentage, and total directory size.
 
 ### Record & Share
 
@@ -177,10 +172,10 @@ The output is a single summary line: file count, raw → compressed, savings per
 ## ❓ FAQ
 
 - **Does `zlog` break chat history?**  
-  **No.** `transcript.jsonl` files are strictly excluded. 100% memory retained.
+  **No.** `transcript.jsonl` files are strictly excluded by filter.
 
 - **What if an AI agent is actively writing to a log file?**  
-  **Safe.** Kernel lock checks (`fuser -s` / `lsof` / `System.IO.File`) & 60s age buffer (`-mmin +1`) skip active files. Lock checks require `fuser` (Linux/WSL) or `lsof` (macOS); without either only the age buffer protects.
+  Kernel lock checks (`fuser -s` / `lsof` / `System.IO.File`) & 60s age buffer (`-mmin +1`) skip active files. Lock checks require `fuser` (Linux/WSL) or `lsof` (macOS); without either only the age buffer protects. Behavior against live agents is not runtime-tested.
 
 - **How do I read or search compressed `.zst` / `.gz` logs?**  
   - Read: `zstdcat file.log.zst` or `zcat file.log.gz`
@@ -188,10 +183,10 @@ The output is a single summary line: file count, raw → compressed, savings per
   - Search: `zstdgrep "error" file.log.zst` or `zgrep "error" file.log.gz`
 
 - **Is `zlog` safe to run during multi-agent sessions?**  
-  **Yes.** Concurrent process locks and age filters guarantee safe execution across all running agents.
+  It is designed to be: process-lock checks and age filters skip files that are in use. Not runtime-tested against live agents.
 
-- **How does the deep scan stay fast without missing files?**  
-  Hybrid pruning + depth cap: junk/cache dirs (`node_modules`, `Caches`, `Code Cache`, `blob_storage`, `GPUCache`, `.git`, …) are pruned wholesale, while `-maxdepth 12` bounds the walk. Real agent logs — even Antigravity's 8-level nesting — are never missed, and the pruned-dir count is reported.
+- **How does the deep scan stay bounded?**  
+  Hybrid pruning + depth cap: junk/cache dirs (`node_modules`, `Caches`, `Code Cache`, `blob_storage`, `GPUCache`, `.git`, …) are pruned wholesale, while `-maxdepth 12` bounds the walk. The pruned-dir count is reported.
 
 ---
 

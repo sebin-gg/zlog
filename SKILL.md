@@ -1,8 +1,8 @@
 ---
 name: zlog
-description: Compresses AI agent session logs (`.log`, `.out`, `.txt`, `.trace` over 10KiB) to `.zst`, `.xz`, `.gz`, or `.tar.gz` (Windows), saving 77%-99.9% disk space. Purges empty 0-byte logs, skips locked and in-flight files, safe for concurrent multi-instance running agents. Use when wrapping up, ending sessions, or asked to clean logs, zlog, pack logs, or find new AI agents.
+description: Compresses AI agent session logs (`.log`, `.out`, `.txt`, `.trace` over 10KiB) to `.zst`, `.xz`, `.gz`, or `.tar.gz` (PowerShell). Purges empty 0-byte logs, skips locked and in-flight files. Use when wrapping up, ending sessions, or asked to clean logs, zlog, pack logs, or find new AI agents.
 license: MIT
-compatibility: Linux, macOS, WSL, Windows 11 (Bash, Zsh, Git Bash, PowerShell)
+compatibility: Linux (Bash, Zsh — tested). macOS, WSL, Windows 11 (Git Bash, PowerShell) snippets included but not runtime-tested.
 allowed-tools: Bash(find:* stat:* fuser:* lsof:* zstd:* xz:* gzip:* tar:* du:* awk:* tail:*) Read Write
 metadata:
   version: "1.5.0"
@@ -11,7 +11,7 @@ metadata:
 
 # Zlog Multi-Instance Storage Optimizer
 
-Compress background tool logs across AI agents (~77%-99.9% space saved / fast zstd -15 fallback). Purge 0-byte empty logs. Keep `transcript.jsonl` intact. Safe for concurrent running agents. Skip tiny logs (<10KiB) and text docs. Handle symlinks cleanly. Reports per-run savings + total summary.
+Compress background tool logs across AI agents (zstd -15 with xz/gzip fallback). Purge 0-byte empty logs. Keep `transcript.jsonl` intact. Skip locked and in-flight files; live-agent safety not runtime-tested. Skip tiny logs (<10KiB) and text docs. Skips symlinked top dirs in final total. Reports per-run savings + total summary.
 
 ## Execution Intents
 
@@ -26,11 +26,11 @@ Compress background tool logs across AI agents (~77%-99.9% space saved / fast zs
 - **Protected Files**: Exclude `*.jsonl`, `SKILL.md`, `README*`, `LICENSE*`, and files <= 10KiB.
 - **Junk-Dir Pruning**: Every scan shares one canonical prune list — `node_modules`, `Caches`, `Cache`, `Code Cache`, `blob_storage`, `GPUCache`, `DawnGraphiteCache`, `DawnWebGPUCache`, `.git` — defined once per snippet as `prune=(...)` and passed as `"${prune[@]}"` (POSIX; PowerShell applies the same segments as path filters). Pruned-dir count is reported.
 - **Depth Bound**: Deep scan capped at `-maxdepth 12` (Antigravity nests ~8 levels deep) — bounded runtime, belt-and-suspenders with pruning.
-- **Hardlink Aliases**: Mirror dirs sharing the same inode (e.g. Antigravity `antigravity-*` copies) may list one file several times; each name compresses independently — harmless and self-healing.
+- **Hardlink Aliases**: Mirror dirs sharing the same inode (e.g. Antigravity `antigravity-*` copies) may list one file several times; each name compresses independently.
 
 ## Commands
 
-### Standard Compression & Empty Log Purge (Linux, macOS, WSL, Git Bash)
+### Standard Compression & Empty Log Purge (POSIX shell — tested on Linux)
 
 ```bash
 raw=0; saved=0; count=0
@@ -83,7 +83,7 @@ echo ""
 echo "[DRY-RUN] Total: $count files, $total_hum raw -> ~$comp_hum compressed (est. 77% savings)"
 ```
 
-### Windows 11 Native Compression (PowerShell - Process Lock Safe)
+### Windows 11 Compression (PowerShell — not runtime-tested)
 
 ```powershell
 $zlogPaths = "$env:USERPROFILE\.gemini","$env:APPDATA\Cursor","$env:USERPROFILE\.config\Cursor","$env:USERPROFILE\.cursor","$env:USERPROFILE\.ollama","$env:LOCALAPPDATA\Ollama","$env:USERPROFILE\.claude","$env:USERPROFILE\.config\claude-code","$env:USERPROFILE\.windsurf","$env:APPDATA\Windsurf","$env:USERPROFILE\.config\Windsurf","$env:USERPROFILE\.codex","$env:USERPROFILE\.cache\lm-studio","$env:USERPROFILE\.lm-studio"

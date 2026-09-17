@@ -1,6 +1,15 @@
 # Changelog
 
-## Unreleased (toward 1.5.0)
+## Unreleased (docs-only, no version bump)
+
+- Removed unverified claims repo-wide. Compatibility now states Linux-tested,
+  other platforms untested. Unmeasured savings figures, the benchmark table,
+  runtime counts, and absolute guarantee wording replaced with mechanism
+  descriptions. Benchmark section now points at the dry-run preview.
+- Social card rebuilt from fixed SVG: mechanism wording only, no hard
+  numbers; PNG regenerated via rsvg/ImageMagick at 1200x630.
+
+## 1.5.0 (2026-09-17)
 
 - Scan `%LOCALAPPDATA%\Ollama` on Windows (app/server/upgrade logs) plus
   `~/AppData/Local/Ollama` under Git Bash; deep scan matches
