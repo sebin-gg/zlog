@@ -11,7 +11,7 @@ curl -fsSL "https://raw.githubusercontent.com/sebin-gg/zlog/$ZLOG_REF/SKILL.md" 
 
 # Verify download is valid SKILL.md
 if ! head -1 "$TMP_FILE" | grep -q "^---$"; then
-  echo "Error: Downloaded file is not valid SKILL.md (missing frontmatter)"
+  echo "Error: Downloaded file is not valid SKILL.md (missing frontmatter)" >&2
   rm -f "$TMP_FILE"
   exit 1
 fi
