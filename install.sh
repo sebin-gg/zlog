@@ -1,5 +1,5 @@
 #!/bin/bash
-# zlog installer — installs AI skill + terminal CLI
+# zlog installer — installs AI skill
 # Supports: Antigravity, Gemini CLI, Cursor, Claude Code, Codex, Windsurf, Ollama, Aider, LM Studio
 set -e
 

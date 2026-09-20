@@ -1,5 +1,28 @@
 # Changelog
 
+## Unreleased (v1.6.0: Win11-verified, claim-free)
+
+- Removed all unmeasured savings figures repo-wide (`~77%`, `4-5x`,
+  `98%` demo): hero, highlights, frontmatter description, intro, and the
+  dry-run estimator now report measured per-run numbers only (Win11
+  measured: 20.0K -> 12.7K, 36% on random data).
+- PowerShell verified on stock Windows 11 (PS 5.1), 9/9 + 5/5 sandbox
+  checks: compress/skip/purge/lock/junk/space-in-path all pass. Fixed
+  inline `(try {...} catch {...})` in `Where-Object` (statement not
+  valid in 5.1 pipelines) via `zlogFree()` helper; tar args quoted;
+  empty-artifact guard added.
+- One canonical POSIX dir list in standard, dry-run, and deep scan
+  (10 classic dirs + `.lm-studio`, `.aider`, macOS Library, Win Git Bash
+  AppData); `*.txt` excluded everywhere by default; `-print0` +
+  `read -d ''` and awk sizes everywhere (no `numfmt` dependency).
+- Deep scan fixes: explicit lock-check block with `continue` (no more
+  stale-artifact counting), pruned-dir count now counts pruned dirs
+  only (was counting every walked node), purge `find` prunes junk dirs,
+  `*/.aider/*` + `*/AppData/*` discovery paths added.
+- `README.md` install section no longer references the removed
+  `~/.local/bin/zlog` CLI wrapper; `install.sh` header fixed.
+- `allowed-tools` gains `wc` (used by deep-scan prune count).
+
 ## Unreleased (docs-only, no version bump)
 
 - Removed unverified claims repo-wide. Compatibility now states Linux-tested,
