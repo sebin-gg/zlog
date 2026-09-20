@@ -8,6 +8,7 @@ on:
 
 jobs:
   validate:
+    name: Validate SKILL.md Frontmatter & Syntax
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -32,3 +33,106 @@ jobs:
                   sys.exit(1)
           print("✓ SKILL.md frontmatter validation passed!")
           '
+      - name: bash -n all bash snippets (SKILL.md, README.md) + install.sh
+        run: |
+          python3 -c '
+          import re, subprocess, sys, tempfile, os
+          failed = False
+          for path in ("SKILL.md", "README.md"):
+              with open(path) as f:
+                  text = f.read()
+              blocks = re.findall(r"^```bash$\n(.*?)^```$", text, re.M | re.S)
+              for i, block in enumerate(blocks):
+                  with tempfile.NamedTemporaryFile("w", suffix=".sh", delete=False) as tf:
+                      tf.write(block)
+                      tmp = tf.name
+                  r = subprocess.run(["bash", "-n", tmp], capture_output=True, text=True)
+                  os.unlink(tmp)
+                  if r.returncode != 0:
+                      print(f"Error: {path} bash block #{i+1} failed bash -n:\n{r.stderr}")
+                      failed = True
+              print(f"✓ {path}: {len(blocks)} bash block(s) pass bash -n")
+          r = subprocess.run(["bash", "-n", "install.sh"], capture_output=True, text=True)
+          if r.returncode != 0:
+              print(f"Error: install.sh failed bash -n:\n{r.stderr}")
+              failed = True
+          else:
+              print("✓ install.sh passes bash -n")
+          sys.exit(1 if failed else 0)
+          '
+      - name: Sync check — SKILL.md POSIX snippet mirrored verbatim in README.md
+        run: |
+          python3 -c '
+          import re, sys
+          with open("SKILL.md") as f:
+              skill = f.read()
+          with open("README.md") as f:
+              readme = f.read()
+          m = re.search(r"^### Standard Compression.*?^```bash$\n(.*?)^```$", skill, re.M | re.S)
+          if not m:
+              print("Error: standard POSIX snippet not found in SKILL.md")
+              sys.exit(1)
+          snippet = m.group(1)
+          if snippet not in readme:
+              print("Error: SKILL.md POSIX snippet not mirrored verbatim in README.md (sync rule violated)")
+              sys.exit(1)
+          print("✓ SKILL.md POSIX snippet mirrored in README.md (sync rule OK)")
+          '
+      - name: Sync check — SKILL.md PowerShell snippet mirrored verbatim in README.md
+        run: |
+          python3 -c '
+          import re, sys
+          with open("SKILL.md") as f:
+              skill = f.read()
+          with open("README.md") as f:
+              readme = f.read()
+          m = re.search(r"^```powershell$\n(.*?)^```$", skill, re.M | re.S)
+          if not m:
+              print("Error: PowerShell snippet not found in SKILL.md")
+              sys.exit(1)
+          snippet = m.group(1)
+          if snippet not in readme:
+              print("Error: SKILL.md PowerShell snippet not mirrored verbatim in README.md (sync rule violated)")
+              sys.exit(1)
+          print("✓ SKILL.md PowerShell snippet mirrored in README.md (sync rule OK)")
+          '
+      - name: Prune parity — all prune=(...) lists identical
+        run: |
+          python3 -c '
+          import re, sys
+          def prunes(path):
+              text = open(path).read()
+              return [" ".join(p.split()) for p in re.findall(r"prune=\((-name.*?)\)", text, re.S)]
+          skill = prunes("SKILL.md")
+          readme = prunes("README.md")
+          allp = skill + readme
+          if not allp:
+              print("Error: no prune=(...) lists found")
+              sys.exit(1)
+          uniq = set(allp)
+          print(f"SKILL.md: {len(skill)} prune list(s), README.md: {len(readme)} prune list(s), unique: {len(uniq)}")
+          if len(uniq) != 1:
+              print("Error: prune lists diverge across snippets/files:")
+              for u in sorted(uniq):
+                  print(f"  - {u}")
+              sys.exit(1)
+          print("✓ all prune lists identical (parity OK)")
+          '
+      - name: PowerShell snippet parse check
+        shell: pwsh
+        run: |
+          $text = Get-Content -Raw SKILL.md
+          $pattern = '(?s)```powershell\r?\n(.*?)```'
+          $m = [regex]::Match($text, $pattern)
+          if (-not $m.Success) {
+            Write-Error 'PowerShell snippet not found in SKILL.md'
+            exit 1
+          }
+          $errors = $null
+          $tokens = $null
+          [void][System.Management.Automation.Language.Parser]::ParseInput($m.Groups[1].Value, [ref]$tokens, [ref]$errors)
+          if ($errors.Count -gt 0) {
+            $errors | ForEach-Object { Write-Error $_.Message }
+            exit 1
+          }
+          Write-Host '✓ PowerShell snippet parses cleanly'
