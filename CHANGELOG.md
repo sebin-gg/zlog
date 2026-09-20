@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased (v1.7.0: symlink-safe, transactional, verified paths)
+
+- POSIX scans no longer follow symlinks (`find -L` removed): symlinked dirs are never descended, symlinked files never match, verified by fixture (external file untouched).
+- Empty-log purge now uses the full safety predicate (pruned location + 60s age + lock check) instead of bare `-delete`.
+- Transactional compression everywhere: temp `.$$.tmp` output -> decompressor integrity test (`-t`) -> smaller-than-source check -> atomic rename -> source removal. Compressor exit codes checked; stale artifacts and size growth can no longer count as success.
+- LM Studio current layout corrected to `~/.lmstudio/` (per LM Studio docs: `~/.lmstudio/bin`, `server-logs`); `~/.lm-studio` spelling removed everywhere.
+- Codex `sqlite/logs_2.sqlite` (+WAL/SHM, observed 32MB live DB) documented as intentionally out of scope.
+- `install.sh`: temp-file `trap` cleanup on exit/interrupt.
+- Concurrency wording softened to best-effort throughout; deep scan labeled as known-location scan, not new-agent discovery.
+- `allowed-tools` gains `rm`, `mv`.
+
 ## Unreleased (v1.6.0: Win11-verified, claim-free)
 
 - Removed all unmeasured savings figures repo-wide (`~77%`, `4-5x`,

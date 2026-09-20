@@ -75,25 +75,36 @@ graph TD
 | 3 | **Cursor IDE** | `~/.config/Cursor/` | Linux, Windows 11 |
 | 4 | **Cursor (Legacy)** | `~/.cursor/` | Linux, Windows 11 |
 | 5 | **Gemini CLI** | `~/.gemini/` | Linux, Windows 11 |
-| 6 | **Gemini Antigravity** | `~/.gemini/antigravity-cli/logs/` *(sub-path of Gemini CLI)* | Linux, Windows 11 |
+| 6 | **Gemini Antigravity** | `~/.gemini/antigravity/` (+ `antigravity-cli/logs/`) | Linux, Windows 11 |
 | 7 | **Ollama** | `~/.ollama/` | Linux, Windows 11 |
 | 8 | **Windsurf** | `~/.windsurf/` | Linux, Windows 11 |
 | 9 | **Codex CLI** | `~/.codex/` | Linux, Windows 11 |
-| 10 | **LM Studio** | `~/.cache/lm-studio/` | Linux, Windows 11 |
+| 10 | **LM Studio** | `~/.cache/lm-studio/` (older) + `~/.lmstudio/` (current) | Linux, Windows 11 |
 | 11 | **Aider** | `~/.aider/` | Linux, Windows 11 |
 
-> **Note on Antigravity:** Antigravity CLI stores logs under `~/.gemini/antigravity-cli/logs/` — it is a Gemini CLI sub-component, not a standalone top-level agent. It is covered automatically when scanning `~/.gemini/`.
+> **Note on Antigravity:** Antigravity stores logs under `~/.gemini/antigravity/` (and `~/.gemini/antigravity-cli/logs/`) — a Gemini CLI sub-component, not a standalone top-level agent. Both are covered automatically when scanning `~/.gemini/`.
 
 ## 💻 One-Line Command Snippets
+
+> POSIX scans never follow symlinks (`find -P` default): symlinked dirs are not descended into and symlinked files are skipped, so scans stay inside the listed roots.
 
 ### POSIX Shell (Linux, macOS, WSL, Git Bash)
 
 ```bash
 raw=0; saved=0; count=0
 prune=(-name node_modules -o -name Caches -o -name Cache -o -name "Code Cache" -o -name blob_storage -o -name GPUCache -o -name DawnGraphiteCache -o -name DawnWebGPUCache -o -name .git)
-for d in ~/.claude ~/.config/claude-code ~/.config/Cursor ~/.cursor ~/.gemini ~/.ollama ~/.windsurf ~/.codex ~/.cache/lm-studio ~/.lm-studio ~/.aider "$HOME/Library/Application Support/Cursor" "$HOME/Library/Application Support/Windsurf" ~/.config/Windsurf "$HOME/AppData/Local/Ollama"; do
+for d in ~/.claude ~/.config/claude-code ~/.config/Cursor ~/.cursor ~/.gemini ~/.ollama ~/.windsurf ~/.codex ~/.cache/lm-studio ~/.lmstudio ~/.aider "$HOME/Library/Application Support/Cursor" "$HOME/Library/Application Support/Windsurf" ~/.config/Windsurf "$HOME/AppData/Local/Ollama"; do
   [ -d "$d" ] || continue
-  find -L "$d" \( -type d \( "${prune[@]}" \) -prune \) -o \( -type f \( -name "*.log" -o -name "*.out" -o -name "*.trace" \) -empty -exec rm -f {} + \) 2>/dev/null || true
+  # --- purge empty logs with the same safety predicate (pruned, aged, unlocked) ---
+  while IFS= read -r -d '' f; do
+    [ -z "$f" ] && continue
+    # --- lock check (best-effort): skip if a process holds the file ---
+    locked=0
+    if command -v fuser >/dev/null 2>&1 && fuser -s "$f" 2>/dev/null; then locked=1; fi
+    if [ "$locked" -eq 0 ] && command -v lsof >/dev/null 2>&1 && lsof "$f" >/dev/null 2>&1; then locked=1; fi
+    if [ "$locked" -eq 1 ]; then continue; fi
+    rm -f "$f" 2>/dev/null || true
+  done < <(find "$d" \( -type d \( "${prune[@]}" \) -prune \) -o \( -type f \( -name "*.log" -o -name "*.out" -o -name "*.trace" \) -empty -mmin +1 -print0 \) 2>/dev/null) || true
   while IFS= read -r -d '' f; do
     [ -z "$f" ] && continue
     size=$(stat -c%s "$f" 2>/dev/null || stat -f%z "$f" 2>/dev/null) || size=0
@@ -102,20 +113,24 @@ for d in ~/.claude ~/.config/claude-code ~/.config/Cursor ~/.cursor ~/.gemini ~/
     if command -v fuser >/dev/null 2>&1 && fuser -s "$f" 2>/dev/null; then locked=1; fi
     if [ "$locked" -eq 0 ] && command -v lsof >/dev/null 2>&1 && lsof "$f" >/dev/null 2>&1; then locked=1; fi
     if [ "$locked" -eq 1 ]; then continue; fi
-    # --- compress (prefer zstd -15, fallback to xz -9, then gzip) ---
-    if command -v zstd >/dev/null 2>&1; then zstd -15 -q --rm "$f" 2>/dev/null
-    elif command -v xz >/dev/null 2>&1; then xz -9 "$f" 2>/dev/null
-    else gzip -f "$f" 2>/dev/null
+    # --- transactional compress: temp file -> integrity test -> rename -> remove source ---
+    tmp=""; ext=""; ok=0
+    if command -v zstd >/dev/null 2>&1; then tmp="$f.$$.tmp.zst"; if zstd -15 -q "$f" -o "$tmp" 2>/dev/null && zstd -t -q "$tmp" 2>/dev/null; then ext=zst; ok=1; else rm -f "$tmp" 2>/dev/null; fi
     fi
-    for c in zst xz gz; do
-      [ -f "$f.$c" ] || continue
-      # verify compressed file is non-empty; if empty/corrupt, keep original
-      newsize=$(stat -c%s "$f.$c" 2>/dev/null || stat -f%z "$f.$c" 2>/dev/null) || newsize=0
-      if [ "$newsize" -eq 0 ]; then rm -f "$f.$c" 2>/dev/null; continue; fi
-      raw=$((raw + size)); saved=$((saved + size - newsize)); count=$((count + 1))
-      break
-    done
-  done < <(find -L "$d" \( -type d \( "${prune[@]}" \) -prune \) -o \( -type f \( -name "*.log" -o -name "*.out" -o -name "*.trace" \) -not -name "*.gz" -not -name "*.zst" -not -name "*.xz" -not -name "*.jsonl" -not -name "SKILL.md" -not -iname "README*" -not -iname "LICENSE*" -size +10k -mmin +1 -print0 \) 2>/dev/null)
+    if [ "$ok" -eq 0 ] && command -v xz >/dev/null 2>&1; then tmp="$f.$$.tmp.xz"; if xz -9 -c "$f" > "$tmp" 2>/dev/null && xz -t "$tmp" 2>/dev/null; then ext=xz; ok=1; else rm -f "$tmp" 2>/dev/null; fi
+    fi
+    if [ "$ok" -eq 0 ]; then tmp="$f.$$.tmp.gz"; if gzip -9 -c "$f" > "$tmp" 2>/dev/null && gzip -t "$tmp" 2>/dev/null; then ext=gz; ok=1; else rm -f "$tmp" 2>/dev/null; fi
+    fi
+    if [ "$ok" -eq 1 ]; then
+      newsize=$(stat -c%s "$tmp" 2>/dev/null || stat -f%z "$tmp" 2>/dev/null) || newsize=0
+      # only replace when the archive is valid AND smaller (high-entropy files can grow)
+      if [ "$newsize" -gt 0 ] && [ "$newsize" -lt "$size" ] && mv -f "$tmp" "$f.$ext" 2>/dev/null; then
+        rm -f "$f" 2>/dev/null
+        raw=$((raw + size)); saved=$((saved + size - newsize)); count=$((count + 1))
+      else rm -f "$tmp" 2>/dev/null
+      fi
+    fi
+  done < <(find "$d" \( -type d \( "${prune[@]}" \) -prune \) -o \( -type f \( -name "*.log" -o -name "*.out" -o -name "*.trace" \) -not -name "*.gz" -not -name "*.zst" -not -name "*.xz" -not -name "*.tmp.*" -not -name "*.jsonl" -not -name "SKILL.md" -not -iname "README*" -not -iname "LICENSE*" -size +10k -mmin +1 -print0 \) 2>/dev/null) || true
 done
 if [ "$count" -gt 0 ]; then
   comp=$((raw - saved))
@@ -125,7 +140,7 @@ if [ "$count" -gt 0 ]; then
   pct=0; [ "$raw" -gt 0 ] && pct=$(( saved * 100 / raw ))
   echo "[zlog] Compressed $count files: $raw_h -> $comp_h (saved $saved_h, $pct% smaller)"
 fi
-dirs=(); for d in ~/.claude ~/.config/claude-code ~/.config/Cursor ~/.cursor ~/.gemini ~/.ollama ~/.windsurf ~/.codex ~/.cache/lm-studio ~/.lm-studio ~/.aider "$HOME/Library/Application Support/Cursor" "$HOME/Library/Application Support/Windsurf" ~/.config/Windsurf "$HOME/AppData/Local/Ollama"; do [ -d "$d" ] && [ ! -L "$d" ] && dirs+=("$d"); done; [ ${#dirs[@]} -gt 0 ] && du -ch "${dirs[@]}" 2>/dev/null | tail -n 1 || true
+dirs=(); for d in ~/.claude ~/.config/claude-code ~/.config/Cursor ~/.cursor ~/.gemini ~/.ollama ~/.windsurf ~/.codex ~/.cache/lm-studio ~/.lmstudio ~/.aider "$HOME/Library/Application Support/Cursor" "$HOME/Library/Application Support/Windsurf" ~/.config/Windsurf "$HOME/AppData/Local/Ollama"; do [ -d "$d" ] && [ ! -L "$d" ] && dirs+=("$d"); done; [ ${#dirs[@]} -gt 0 ] && du -ch "${dirs[@]}" 2>/dev/null | tail -n 1 || true
 ```
 
 > `*.txt` is intentionally excluded by default to avoid compressing config/docs/data files. To include `.txt` logs that you know are safe, add `-o -name "*.txt"` to both `\( -name "*.log" ... \)` groups and to the `-Include` list in PowerShell.
@@ -133,13 +148,13 @@ dirs=(); for d in ~/.claude ~/.config/claude-code ~/.config/Cursor ~/.cursor ~/.
 ### Windows 11 PowerShell (tested on Windows 11)
 
 ```powershell
-$zlogPaths = "$env:USERPROFILE\.gemini","$env:APPDATA\Cursor","$env:USERPROFILE\.config\Cursor","$env:USERPROFILE\.cursor","$env:USERPROFILE\.ollama","$env:LOCALAPPDATA\Ollama","$env:USERPROFILE\.claude","$env:USERPROFILE\.config\claude-code","$env:USERPROFILE\.windsurf","$env:APPDATA\Windsurf","$env:USERPROFILE\.config\Windsurf","$env:USERPROFILE\.codex","$env:USERPROFILE\.cache\lm-studio","$env:USERPROFILE\.lm-studio"
+$zlogPaths = "$env:USERPROFILE\.gemini","$env:APPDATA\Cursor","$env:USERPROFILE\.config\Cursor","$env:USERPROFILE\.cursor","$env:USERPROFILE\.ollama","$env:LOCALAPPDATA\Ollama","$env:USERPROFILE\.claude","$env:USERPROFILE\.config\claude-code","$env:USERPROFILE\.windsurf","$env:APPDATA\Windsurf","$env:USERPROFILE\.config\Windsurf","$env:USERPROFILE\.codex","$env:USERPROFILE\.cache\lm-studio","$env:USERPROFILE\.lmstudio"
 $junk = '\node_modules\','\Caches\','\Cache\','\Code Cache\','\blob_storage\','\GPUCache\','\DawnGraphiteCache\','\DawnWebGPUCache\','\.git\'
 function zlogFmt($b) { if ($b -ge 1073741824) { "{0:N1}G" -f ($b/1073741824) } elseif ($b -ge 1048576) { "{0:N1}M" -f ($b/1048576) } elseif ($b -ge 1024) { "{0:N1}K" -f ($b/1024) } else { "${b}B" } }
 function zlogFree($p) { try { $s = [System.IO.File]::Open($p, 'Open', 'ReadWrite', 'None'); $s.Close(); $true } catch { $false } }
-Get-ChildItem -Path $zlogPaths -Recurse -Include *.log,*.out,*.trace -Exclude *.gz,*.zst,*.xz,*.jsonl,SKILL.md,README*,LICENSE* -ErrorAction SilentlyContinue | Where-Object { $p = $_.FullName; $_.Length -eq 0 -and -not ($junk | Where-Object { $p -like "*$_*" }) } | Remove-Item -Force -ErrorAction SilentlyContinue
+Get-ChildItem -Path $zlogPaths -Recurse -Include *.log,*.out,*.trace -Exclude *.gz,*.zst,*.xz,*.jsonl,SKILL.md,README*,LICENSE* -ErrorAction SilentlyContinue | Where-Object { $p = $_.FullName; $_.Length -eq 0 -and $_.LastWriteTime -lt (Get-Date).AddMinutes(-1) -and -not ($junk | Where-Object { $p -like "*$_*" }) -and (zlogFree $p) } | Remove-Item -Force -ErrorAction SilentlyContinue
 $count=0; $raw=0; $saved=0
-Get-ChildItem -Path $zlogPaths -Recurse -Include *.log,*.out,*.trace -Exclude *.gz,*.zst,*.xz,*.jsonl,SKILL.md,README*,LICENSE* -ErrorAction SilentlyContinue | Where-Object { $p = $_.FullName; $_.Length -gt 10KB -and $_.LastWriteTime -lt (Get-Date).AddMinutes(-1) -and -not ($junk | Where-Object { $p -like "*$_*" }) -and (zlogFree $p) } | ForEach-Object { $size=$_.Length; $out="$($_.FullName).tar.gz"; tar.exe -czf "$out" -C "$($_.DirectoryName)" "$($_.Name)"; if ($LASTEXITCODE -eq 0 -and (Test-Path $out) -and ((Get-Item $out).Length -gt 0)) { $new=(Get-Item $out).Length; $raw+=$size; $saved+=($size-$new); $count++; Remove-Item $_.FullName } }
+Get-ChildItem -Path $zlogPaths -Recurse -Include *.log,*.out,*.trace -Exclude *.gz,*.zst,*.xz,*.jsonl,SKILL.md,README*,LICENSE* -ErrorAction SilentlyContinue | Where-Object { $p = $_.FullName; $_.Length -gt 10KB -and $_.LastWriteTime -lt (Get-Date).AddMinutes(-1) -and -not ($junk | Where-Object { $p -like "*$_*" }) -and (zlogFree $p) } | ForEach-Object { $size=$_.Length; $tmp="$($_.FullName).$PID.tmp.tar.gz"; $out="$($_.FullName).tar.gz"; tar.exe -czf "$tmp" -C "$($_.DirectoryName)" "$($_.Name)"; if ($LASTEXITCODE -eq 0 -and (Test-Path $tmp) -and ((Get-Item $tmp).Length -gt 0) -and ((Get-Item $tmp).Length -lt $size)) { Move-Item -Force $tmp $out; $new=(Get-Item $out).Length; $raw+=$size; $saved+=($size-$new); $count++; Remove-Item $_.FullName } else { if (Test-Path $tmp) { Remove-Item $tmp -Force -ErrorAction SilentlyContinue } } }
 if ($count -gt 0) { $comp=$raw-$saved; $pct=0; if ($raw -gt 0) { $pct=[math]::Floor($saved*100/$raw) }; echo "[zlog] Compressed $count files: $(zlogFmt $raw) -> $(zlogFmt $comp) (saved $(zlogFmt $saved), $pct% smaller)" }
 ```
 
@@ -180,6 +195,14 @@ The output is a single summary line: file count, raw → compressed, savings per
 
 ---
 
+## Compatibility
+
+- **Linux**: Bash/Zsh snippets tested.
+- **Windows 11**: PowerShell snippet verified on stock PS 5.1 (sandbox: compress/skip/purge/lock/junk/space-in-path).
+- **macOS / WSL**: snippets ship with `stat -f` / `lsof` / Git Bash path fallbacks but are not runtime-tested here.
+
+---
+
 ## ❓ FAQ
 
 - **Does `zlog` break chat history?**  
@@ -194,7 +217,10 @@ The output is a single summary line: file count, raw → compressed, savings per
   - Search: `zstdgrep "error" file.log.zst` or `zgrep "error" file.log.gz`
 
 - **Is `zlog` safe to run during multi-agent sessions?**  
-  It is designed to be: process-lock checks and age filters skip files that are in use. Not runtime-tested against live agents.
+  Best-effort only: lock checks + age filters skip files that are in use, but races remain possible. Prefer idle periods.
+
+- **Why doesn’t `zlog` touch Codex `logs_2.sqlite`?**  
+  SQLite/WAL stores (e.g. `~/.codex/sqlite/logs_2.sqlite`, observed at 32MB) are live databases — compressing them while open risks corruption. Intentionally out of scope; manage them via the app.
 
 - **How does the deep scan stay bounded?**  
   Hybrid pruning + depth cap: junk/cache dirs (`node_modules`, `Caches`, `Code Cache`, `blob_storage`, `GPUCache`, `.git`, …) are pruned wholesale, while `-maxdepth 12` bounds the walk. The pruned-dir count is reported.

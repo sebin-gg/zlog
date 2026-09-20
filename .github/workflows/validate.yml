@@ -6,12 +6,15 @@ on:
   pull_request:
     branches: [ main ]
 
+permissions:
+  contents: read
+
 jobs:
   validate:
     name: Validate SKILL.md Frontmatter & Syntax
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4 pinned
       - name: Validate SKILL.md Frontmatter & Syntax
         run: |
           python3 -c '
@@ -136,3 +139,47 @@ jobs:
             exit 1
           }
           Write-Host '✓ PowerShell snippet parses cleanly'
+
+  fixtures:
+    name: Fixture safety tests (POSIX standard snippet)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4 pinned
+      - name: Run standard snippet against hostile fixtures
+        run: |
+          python3 - <<'EOF'
+          import io, re
+          sk = io.open('SKILL.md', encoding='utf8').read()
+          m = re.search(r'^### Standard Compression.*?^```bash$\n(.*?)```$', sk, re.M | re.S)
+          assert m, 'standard snippet not found in SKILL.md'
+          assert 'find "$d"' in m.group(1) and 'find -L' not in m.group(1), 'must not follow symlinks'
+          io.open('/tmp/std.sh', 'w', encoding='utf8', newline='\n').write(m.group(1))
+          print('extracted standard snippet')
+          EOF
+          export HOME=/tmp/fxhome
+          rm -rf /tmp/fxhome /tmp/fxoutside
+          mkdir -p $HOME/.claude/node_modules $HOME/.cursor /tmp/fxoutside
+          yes "compressible log line" | head -c 20480 > $HOME/.claude/ok.log
+          head -c 20480 /dev/urandom > $HOME/.claude/noise.log
+          head -c 20480 /dev/urandom > /tmp/fxoutside/secret.log
+          ln -s /tmp/fxoutside $HOME/.claude/linkdir
+          head -c 20480 /dev/urandom > $HOME/.claude/stale.log
+          head -c 100 /dev/urandom > $HOME/.claude/stale.log.zst
+          : > $HOME/.claude/oldempty.log
+          : > $HOME/.claude/newempty.log
+          head -c 20480 /dev/urandom > $HOME/.claude/node_modules/junk.log
+          touch -d '5 minutes ago' $HOME/.claude/ok.log $HOME/.claude/noise.log \
+            /tmp/fxoutside/secret.log $HOME/.claude/stale.log $HOME/.claude/stale.log.zst \
+            $HOME/.claude/oldempty.log $HOME/.claude/node_modules/junk.log
+          bash /tmp/std.sh
+          fail=0
+          check() { if eval "$2"; then echo "PASS: $1"; else echo "FAIL: $1"; fail=1; fi }
+          check "compressible log archived" "[ ! -f $HOME/.claude/ok.log ] && ls $HOME/.claude/ok.log.* >/dev/null"
+          check "symlink escape blocked" "[ -f /tmp/fxoutside/secret.log ] && [ ! -f /tmp/fxoutside/secret.log.zst ] && [ ! -f /tmp/fxoutside/secret.log.gz ] && [ ! -f /tmp/fxoutside/secret.log.xz ]"
+          check "old empty purged" "[ ! -f $HOME/.claude/oldempty.log ]"
+          check "fresh empty kept (age)" "[ -f $HOME/.claude/newempty.log ]"
+          check "junk dir kept" "[ -f $HOME/.claude/node_modules/junk.log ]"
+          check "high-entropy kept (size guard)" "[ -f $HOME/.claude/noise.log ]"
+          check "stale artifact not counted" "[ -f $HOME/.claude/stale.log ]"
+          check "no tmp leftovers" "[ -z \"\$(ls $HOME/.claude/ | grep 'tmp\.' || true)\" ]"
+          exit $fail

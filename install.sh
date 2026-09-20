@@ -5,6 +5,7 @@ set -e
 
 ZLOG_REF="${ZLOG_REF:-main}"
 TMP_FILE="$(mktemp)"
+trap 'rm -f "$TMP_FILE"' EXIT
 REPO_RAW="https://raw.githubusercontent.com/sebin-gg/zlog/${ZLOG_REF}"
 SKILL_SRC="$REPO_RAW/SKILL.md"
 
