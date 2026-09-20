@@ -1,5 +1,27 @@
 # Changelog
 
+## Unreleased (v2.0.0: skill architecture — brain + scripts + references + tests)
+
+- `SKILL.md` rewritten as the decision brain (Purpose, Use When,
+  Don't Use When, Workflow, Safety Rules, Reporting, Edge Cases);
+  all shell implementation moved out.
+- New `scripts/zlog.sh` / `scripts/zlog.ps1` helpers with modes
+  `preview|clean|deep-preview|deep|restore` and `--older-than DAYS`
+  retention (`-OlderThanDays` on PowerShell). One shared candidate
+  engine serves preview and clean, so previews never disagree.
+- New `references/` (`agent-paths.md` with verification dates,
+  `safety.md` data classes A-D, `formats.md` incl. restore).
+- New `tests/` (`test-posix.sh`, `test-powershell.ps1`): prune,
+  symlink escape, purge age/lock, stale artifacts, size guard,
+  locks, restore, read-only deep-preview — all passing on Win11
+  (PS 5.1) and Git Bash; CI runs them.
+- Protected classes extended: `transcript*`, `conversation*`,
+  `history*`, `*.sqlite*`, `*.db`, `*.wal`, `*.shm`.
+- Fixed PS positional param bug (`restore <path>` bound to the wrong
+  parameter) and `tar.exe`-only invocation (now per-platform).
+- `install.sh` installs the full skill set; `README.md` shows usage
+  only; CI validates behavior, not Markdown sync.
+
 ## Unreleased (v1.7.0: symlink-safe, transactional, verified paths)
 
 - POSIX scans no longer follow symlinks (`find -L` removed): symlinked dirs are never descended, symlinked files never match, verified by fixture (external file untouched).

@@ -15,7 +15,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4 pinned
-      - name: Validate SKILL.md Frontmatter & Syntax
+      - name: Validate SKILL.md frontmatter
         run: |
           python3 -c '
           import sys, yaml
@@ -34,152 +34,56 @@ jobs:
               if req not in fm:
                   print(f"Error: Missing required field {req}")
                   sys.exit(1)
+          if "```bash" in content or "```powershell" in content:
+              print("Error: SKILL.md must be the decision brain, no shell implementation inside it")
+              sys.exit(1)
           print("✓ SKILL.md frontmatter validation passed!")
           '
-      - name: bash -n all bash snippets (SKILL.md, README.md) + install.sh
+      - name: bash -n scripts, installer, tests
+        run: |
+          for f in scripts/zlog.sh install.sh tests/test-posix.sh; do
+            bash -n "$f" || { echo "Error: $f failed bash -n"; exit 1; }
+            echo "✓ $f passes bash -n"
+          done
+      - name: Architecture invariants (no impl in Markdown, no -L, no estimates)
         run: |
           python3 -c '
-          import re, subprocess, sys, tempfile, os
-          failed = False
-          for path in ("SKILL.md", "README.md"):
-              with open(path) as f:
-                  text = f.read()
-              blocks = re.findall(r"^```bash$\n(.*?)^```$", text, re.M | re.S)
-              for i, block in enumerate(blocks):
-                  with tempfile.NamedTemporaryFile("w", suffix=".sh", delete=False) as tf:
-                      tf.write(block)
-                      tmp = tf.name
-                  r = subprocess.run(["bash", "-n", tmp], capture_output=True, text=True)
-                  os.unlink(tmp)
-                  if r.returncode != 0:
-                      print(f"Error: {path} bash block #{i+1} failed bash -n:\n{r.stderr}")
-                      failed = True
-              print(f"✓ {path}: {len(blocks)} bash block(s) pass bash -n")
-          r = subprocess.run(["bash", "-n", "install.sh"], capture_output=True, text=True)
-          if r.returncode != 0:
-              print(f"Error: install.sh failed bash -n:\n{r.stderr}")
-              failed = True
-          else:
-              print("✓ install.sh passes bash -n")
-          sys.exit(1 if failed else 0)
+          import sys
+          skill = open("SKILL.md").read()
+          readme = open("README.md").read()
+          sh = open("scripts/zlog.sh").read()
+          ok = True
+          def check(cond, msg):
+              global ok
+              print(("✓ " if cond else "FAIL: ") + msg)
+              if not cond: ok = False
+          check("find -L" not in sh, "scripts/zlog.sh never follows symlinks")
+          check(sh.count("prune=(-name") == 1, "single canonical prune definition")
+          check("77%" not in skill and "77%" not in readme, "no unmeasured % claims in docs")
+          check("4-5x" not in skill and "4-5x" not in readme, "no ratio claims in docs")
+          check("local/bin/zlog" not in skill and "local/bin/zlog" not in readme, "no stale CLI refs")
+          for f in ["SKILL.md", "scripts/zlog.sh", "scripts/zlog.ps1",
+                    "references/agent-paths.md", "references/safety.md", "references/formats.md"]:
+              import os
+              check(os.path.isfile(f), f"skill file present: {f}")
+          sys.exit(0 if ok else 1)
           '
-      - name: Sync check — SKILL.md POSIX snippet mirrored verbatim in README.md
-        run: |
-          python3 -c '
-          import re, sys
-          with open("SKILL.md") as f:
-              skill = f.read()
-          with open("README.md") as f:
-              readme = f.read()
-          m = re.search(r"^### Standard Compression.*?^```bash$\n(.*?)^```$", skill, re.M | re.S)
-          if not m:
-              print("Error: standard POSIX snippet not found in SKILL.md")
-              sys.exit(1)
-          snippet = m.group(1)
-          if snippet not in readme:
-              print("Error: SKILL.md POSIX snippet not mirrored verbatim in README.md (sync rule violated)")
-              sys.exit(1)
-          print("✓ SKILL.md POSIX snippet mirrored in README.md (sync rule OK)")
-          '
-      - name: Sync check — SKILL.md PowerShell snippet mirrored verbatim in README.md
-        run: |
-          python3 -c '
-          import re, sys
-          with open("SKILL.md") as f:
-              skill = f.read()
-          with open("README.md") as f:
-              readme = f.read()
-          m = re.search(r"^```powershell$\n(.*?)^```$", skill, re.M | re.S)
-          if not m:
-              print("Error: PowerShell snippet not found in SKILL.md")
-              sys.exit(1)
-          snippet = m.group(1)
-          if snippet not in readme:
-              print("Error: SKILL.md PowerShell snippet not mirrored verbatim in README.md (sync rule violated)")
-              sys.exit(1)
-          print("✓ SKILL.md PowerShell snippet mirrored in README.md (sync rule OK)")
-          '
-      - name: Prune parity — all prune=(...) lists identical
-        run: |
-          python3 -c '
-          import re, sys
-          def prunes(path):
-              text = open(path).read()
-              return [" ".join(p.split()) for p in re.findall(r"prune=\((-name.*?)\)", text, re.S)]
-          skill = prunes("SKILL.md")
-          readme = prunes("README.md")
-          allp = skill + readme
-          if not allp:
-              print("Error: no prune=(...) lists found")
-              sys.exit(1)
-          uniq = set(allp)
-          print(f"SKILL.md: {len(skill)} prune list(s), README.md: {len(readme)} prune list(s), unique: {len(uniq)}")
-          if len(uniq) != 1:
-              print("Error: prune lists diverge across snippets/files:")
-              for u in sorted(uniq):
-                  print(f"  - {u}")
-              sys.exit(1)
-          print("✓ all prune lists identical (parity OK)")
-          '
-      - name: PowerShell snippet parse check
+      - name: PowerShell parse checks (script + tests)
         shell: pwsh
         run: |
-          $text = Get-Content -Raw SKILL.md
-          $pattern = '(?s)```powershell\r?\n(.*?)```'
-          $m = [regex]::Match($text, $pattern)
-          if (-not $m.Success) {
-            Write-Error 'PowerShell snippet not found in SKILL.md'
-            exit 1
+          foreach ($f in @('scripts/zlog.ps1', 'tests/test-powershell.ps1')) {
+            $errs = $null; $toks = $null
+            [void][System.Management.Automation.Language.Parser]::ParseFile($f, [ref]$toks, [ref]$errs)
+            if ($errs.Count -gt 0) { $errs | ForEach-Object { Write-Error "$f : $($_.Message)" }; exit 1 }
+            Write-Host "✓ $f parses cleanly"
           }
-          $errors = $null
-          $tokens = $null
-          [void][System.Management.Automation.Language.Parser]::ParseInput($m.Groups[1].Value, [ref]$tokens, [ref]$errors)
-          if ($errors.Count -gt 0) {
-            $errors | ForEach-Object { Write-Error $_.Message }
-            exit 1
-          }
-          Write-Host '✓ PowerShell snippet parses cleanly'
-
-  fixtures:
-    name: Fixture safety tests (POSIX standard snippet)
+  behavior:
+    name: Behavioral fixture tests
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4 pinned
-      - name: Run standard snippet against hostile fixtures
-        run: |
-          python3 - <<'EOF'
-          import io, re
-          sk = io.open('SKILL.md', encoding='utf8').read()
-          m = re.search(r'^### Standard Compression.*?^```bash$\n(.*?)```$', sk, re.M | re.S)
-          assert m, 'standard snippet not found in SKILL.md'
-          assert 'find "$d"' in m.group(1) and 'find -L' not in m.group(1), 'must not follow symlinks'
-          io.open('/tmp/std.sh', 'w', encoding='utf8', newline='\n').write(m.group(1))
-          print('extracted standard snippet')
-          EOF
-          export HOME=/tmp/fxhome
-          rm -rf /tmp/fxhome /tmp/fxoutside
-          mkdir -p $HOME/.claude/node_modules $HOME/.cursor /tmp/fxoutside
-          yes "compressible log line" | head -c 20480 > $HOME/.claude/ok.log
-          head -c 20480 /dev/urandom > $HOME/.claude/noise.log
-          head -c 20480 /dev/urandom > /tmp/fxoutside/secret.log
-          ln -s /tmp/fxoutside $HOME/.claude/linkdir
-          head -c 20480 /dev/urandom > $HOME/.claude/stale.log
-          head -c 100 /dev/urandom > $HOME/.claude/stale.log.zst
-          : > $HOME/.claude/oldempty.log
-          : > $HOME/.claude/newempty.log
-          head -c 20480 /dev/urandom > $HOME/.claude/node_modules/junk.log
-          touch -d '5 minutes ago' $HOME/.claude/ok.log $HOME/.claude/noise.log \
-            /tmp/fxoutside/secret.log $HOME/.claude/stale.log $HOME/.claude/stale.log.zst \
-            $HOME/.claude/oldempty.log $HOME/.claude/node_modules/junk.log
-          bash /tmp/std.sh
-          fail=0
-          check() { if eval "$2"; then echo "PASS: $1"; else echo "FAIL: $1"; fail=1; fi }
-          check "compressible log archived" "[ ! -f $HOME/.claude/ok.log ] && ls $HOME/.claude/ok.log.* >/dev/null"
-          check "symlink escape blocked" "[ -f /tmp/fxoutside/secret.log ] && [ ! -f /tmp/fxoutside/secret.log.zst ] && [ ! -f /tmp/fxoutside/secret.log.gz ] && [ ! -f /tmp/fxoutside/secret.log.xz ]"
-          check "old empty purged" "[ ! -f $HOME/.claude/oldempty.log ]"
-          check "fresh empty kept (age)" "[ -f $HOME/.claude/newempty.log ]"
-          check "junk dir kept" "[ -f $HOME/.claude/node_modules/junk.log ]"
-          check "high-entropy kept (size guard)" "[ -f $HOME/.claude/noise.log ]"
-          check "stale artifact not counted" "[ -f $HOME/.claude/stale.log ]"
-          check "no tmp leftovers" "[ -z \"\$(ls $HOME/.claude/ | grep 'tmp\.' || true)\" ]"
-          exit $fail
+      - name: POSIX destructive-behavior fixtures
+        run: bash tests/test-posix.sh scripts/zlog.sh
+      - name: PowerShell destructive-behavior fixtures
+        shell: pwsh
+        run: ./tests/test-powershell.ps1 -Script ./scripts/zlog.ps1
