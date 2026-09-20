@@ -3,12 +3,33 @@
 # Supports: Antigravity, Gemini CLI, Cursor, Claude Code, Codex, Windsurf, Ollama, Aider, LM Studio
 set -e
 
-TARGETS="$HOME/.agents/skills/zlog $HOME/.claude/skills/zlog $HOME/.gemini/skills/zlog"
 ZLOG_REF="${ZLOG_REF:-main}"
 TMP_FILE="$(mktemp)"
+REPO_RAW="https://raw.githubusercontent.com/sebin-gg/zlog/${ZLOG_REF}"
+SKILL_SRC="$REPO_RAW/SKILL.md"
 
-echo "Downloading zlog SKILL.md (ref: $ZLOG_REF)..."
-curl -fsSL "https://raw.githubusercontent.com/sebin-gg/zlog/$ZLOG_REF/SKILL.md" -o "$TMP_FILE"
+# Skill dirs: primary (agentskills.io spec) + agent-specific locations if their parent exists
+SKILL_DIRS=(
+  "$HOME/.agents/skills/zlog"
+)
+
+# Also install to Claude/Gemini skills if those homes exist (non-fatal)
+if [ -d "$HOME/.claude" ] || [ -d "$HOME/.config/claude-code" ]; then
+  SKILL_DIRS+=("$HOME/.claude/skills/zlog")
+fi
+if [ -d "$HOME/.gemini" ]; then
+  SKILL_DIRS+=("$HOME/.gemini/skills/zlog")
+fi
+
+echo "Downloading zlog SKILL.md (ref: ${ZLOG_REF:-main})..."
+if command -v curl >/dev/null 2>&1; then
+  curl -fsSL "$SKILL_SRC" -o "$TMP_FILE"
+elif command -v wget >/dev/null 2>&1; then
+  wget -qO "$TMP_FILE" "$SKILL_SRC"
+else
+  echo "Error: curl or wget required to download SKILL.md" >&2
+  exit 1
+fi
 
 # Verify download is valid SKILL.md
 if ! head -1 "$TMP_FILE" | grep -q "^---$"; then
@@ -17,7 +38,7 @@ if ! head -1 "$TMP_FILE" | grep -q "^---$"; then
   exit 1
 fi
 
-for SKILL_DIR in $TARGETS; do
+for SKILL_DIR in "${SKILL_DIRS[@]}"; do
   mkdir -p "$SKILL_DIR"
   if [ -f "$SKILL_DIR/SKILL.md" ]; then
     cp "$SKILL_DIR/SKILL.md" "$SKILL_DIR/SKILL.md.bak"
