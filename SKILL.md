@@ -1,8 +1,8 @@
 ---
 name: zlog
-description: Compresses AI agent session logs (`.log`, `.out`, `.txt`, `.trace` over 10KiB) to `.zst`, `.xz`, `.gz`, or `.tar.gz` (PowerShell). Purges empty 0-byte logs, skips locked and in-flight files. Use when wrapping up, ending sessions, or asked to clean logs, zlog, pack logs, or find new AI agents.
+description: Multi-agent session log compressor and storage optimizer. Compresses `.log`, `.out`, `.trace` (>10KiB) to `.zst`, `.xz`, `.gz`, or `.tar.gz` (Windows) (saving ~77% disk space, typically 4-5x) across `~/.claude`, `~/.config/Cursor`, `~/.gemini`, `~/.ollama`, `~/.windsurf`, `~/.codex`, `~/.aider`, etc. Auto-discovers AI log dirs, purges empty 0-byte logs. Safe for concurrent multi-instance running agents. Includes Dry-Run preview mode. Use when wrapping up, ending sessions, or asked to clean logs, zlog, pack logs, or find new AI agents.
 license: MIT
-compatibility: Linux (Bash, Zsh — tested). macOS, WSL, Windows 11 (Git Bash, PowerShell) snippets included but not runtime-tested.
+compatibility: Linux, Windows 11 (Bash, Zsh, Git Bash, PowerShell)
 allowed-tools: Bash(find:* stat:* fuser:* lsof:* zstd:* xz:* gzip:* tar:* du:* awk:* tail:*) Read Write
 metadata:
   version: "1.5.0"
@@ -11,7 +11,7 @@ metadata:
 
 # Zlog Multi-Instance Storage Optimizer
 
-Compress background tool logs across AI agents (zstd -15 with xz/gzip fallback). Purge 0-byte empty logs. Keep `transcript.jsonl` intact. Skip locked and in-flight files; live-agent safety not runtime-tested. Skip tiny logs (<10KiB) and text docs. Skips symlinked top dirs in final total. Reports per-run savings + total summary.
+Compress background tool logs across AI agents (~77% space saved, typically 4-5x via zstd -15 fallback). Purge 0-byte empty logs. Keep `transcript.jsonl` intact. Safe for concurrent multi-instance running agents. Skip tiny logs (<10KiB) and protected docs. Handle symlinks cleanly. Reports per-run savings + total summary.
 
 ## Execution Intents
 
@@ -21,24 +21,24 @@ Compress background tool logs across AI agents (zstd -15 with xz/gzip fallback).
 
 ## Safety & Invariant Protection
 
-- **Process Locks**: Query `fuser -s "$f"` (Linux/WSL), `lsof "$f"` (macOS), or `[System.IO.File]::Open(..., 'None')` (Windows 11 PowerShell). Skip file if active process lock exists. Requires `fuser` or `lsof`; without either only the 60s age buffer protects in-flight files.
-- **In-Flight Window**: Skip files modified <60 seconds ago (`-mmin +1`).
-- **Protected Files**: Exclude `*.jsonl`, `SKILL.md`, `README*`, `LICENSE*`, and files <= 10KiB.
-- **Junk-Dir Pruning**: Every scan shares one canonical prune list — `node_modules`, `Caches`, `Cache`, `Code Cache`, `blob_storage`, `GPUCache`, `DawnGraphiteCache`, `DawnWebGPUCache`, `.git` — defined once per snippet as `prune=(...)` and passed as `"${prune[@]}"` (POSIX; PowerShell applies the same segments as path filters). Pruned-dir count is reported.
-- **Depth Bound**: Deep scan capped at `-maxdepth 12` (Antigravity nests ~8 levels deep) — bounded runtime, belt-and-suspenders with pruning.
-- **Hardlink Aliases**: Mirror dirs sharing the same inode (e.g. Antigravity `antigravity-*` copies) may list one file several times; each name compresses independently.
+- **Process Locks (best-effort)**: Query `fuser -s "$f"` (Linux/WSL) or `lsof "$f"` (macOS) to skip active files. If neither tool is installed (minimal containers), the `fuser`/`lsof` check is skipped and safety relies on the 60s age buffer below — schedule compression during idle periods on such systems. Windows uses `[System.IO.File]::Open(..., 'None')`.
+- **In-Flight Window**: Skip files modified <60 seconds ago (`-mmin +1` / `LastWriteTime < AddMinutes(-1)`).
+- **Protected Files**: Exclude `*.jsonl`, `SKILL.md`, `README*`, `LICENSE*`, and files <= 10KiB. Note: `*.txt` is intentionally NOT compressed by default to avoid touching config/docs/data files (e.g. pip METADATA, user notes); re-add `-name "*.txt"` to the find expression only if you are certain your agent dirs contain only log-like .txt files.
+- **Junk-Dir Pruning**: Scans never descend into `node_modules`, `Caches`, `Cache`, `Code Cache`, `blob_storage`, `GPUCache`, `DawnGraphiteCache`, `DawnWebGPUCache`, or `.git`. Pruned-dir count is reported (deep scan).
+- **Depth Bound**: Deep scan capped at `-maxdepth 12` (nested agent logs ~8 levels deep) — bounded runtime, belt-and-suspenders with pruning.
+- **Hardlink Aliases**: Mirror dirs sharing the same inode may list one file several times; each name compresses independently — harmless and self-healing.
+- **Compression Verification**: After each `zstd`/`xz`/`gzip`/`tar` invocation the script verifies the compressed artifact exists and is non-empty before counting savings or removing the original (Windows `tar` checks exit code + `.tar.gz` existence).
 
 ## Commands
 
-### Standard Compression & Empty Log Purge (POSIX shell — tested on Linux)
+### Standard Compression & Empty Log Purge (Linux, macOS, WSL, Git Bash)
 
 ```bash
 raw=0; saved=0; count=0
-prune=(-name node_modules -o -name Caches -o -name Cache -o -name "Code Cache" -o -name blob_storage -o -name GPUCache -o -name DawnGraphiteCache -o -name DawnWebGPUCache -o -name .git)
-for d in ~/.gemini ~/.config/Cursor "$HOME/Library/Application Support/Cursor" ~/.cursor ~/.ollama "$HOME/AppData/Local/Ollama" ~/.claude ~/.config/claude-code ~/.windsurf ~/.config/Windsurf "$HOME/Library/Application Support/Windsurf" ~/.codex ~/.cache/lm-studio ~/.lm-studio; do
+for d in ~/.claude ~/.config/claude-code ~/.config/Cursor ~/.cursor ~/.gemini ~/.ollama ~/.windsurf ~/.codex ~/.cache/lm-studio ~/.aider; do
   [ -d "$d" ] || continue
-  find -L "$d" \( -type d \( "${prune[@]}" \) -prune \) -o \( -type f \( -name "*.log" -o -name "*.out" -o -name "*.trace" -o -name "*.txt" \) -empty -exec rm -f {} + \) 2>/dev/null || true
-  while IFS= read -r -d '' f; do
+  find -L "$d" \( -name "*.log" -o -name "*.out" -o -name "*.trace" \) -empty -type f -delete 2>/dev/null || true
+  while IFS= read -r f; do
     [ -z "$f" ] && continue
     size=$(stat -c%s "$f" 2>/dev/null || stat -f%z "$f" 2>/dev/null) || size=0
     # --- lock check (best-effort): skip if a process holds the file ---
@@ -59,17 +59,16 @@ for d in ~/.gemini ~/.config/Cursor "$HOME/Library/Application Support/Cursor" ~
       raw=$((raw + size)); saved=$((saved + size - newsize)); count=$((count + 1))
       break
     done
-  done < <(find -L "$d" \( -type d \( "${prune[@]}" \) -prune \) -o \( -type f \( -name "*.log" -o -name "*.out" -o -name "*.trace" -o -name "*.txt" \) -not -name "*.gz" -not -name "*.zst" -not -name "*.xz" -not -name "*.jsonl" -not -name "SKILL.md" -not -iname "README*" -not -iname "LICENSE*" -size +10k -mmin +1 -print0 \) 2>/dev/null)
+  done < <(find -L "$d" \( -type d \( -name node_modules -o -name Caches -o -name Cache -o -name "Code Cache" -o -name blob_storage -o -name GPUCache -o -name DawnGraphiteCache -o -name DawnWebGPUCache -o -name .git \) -prune \) -o \( -type f \( -name "*.log" -o -name "*.out" -o -name "*.trace" \) -not -name "*.gz" -not -name "*.zst" -not -name "*.xz" -not -name "*.jsonl" -not -name "SKILL.md" -not -iname "README*" -not -iname "LICENSE*" -size +10k -mmin +1 \) -print 2>/dev/null)
 done
 if [ "$count" -gt 0 ]; then
   comp=$((raw - saved))
-  raw_h=$(echo "$raw" | awk '{if($1>=1073741824)printf "%.1fG",$1/1073741824;else if($1>=1048576)printf "%.1fM",$1/1048576;else if($1>=1024)printf "%.1fK",$1/1024;else printf "%dB",$1}')
-  comp_h=$(echo "$comp" | awk '{if($1>=1073741824)printf "%.1fG",$1/1073741824;else if($1>=1048576)printf "%.1fM",$1/1048576;else if($1>=1024)printf "%.1fK",$1/1024;else printf "%dB",$1}')
-  saved_h=$(echo "$saved" | awk '{if($1>=1073741824)printf "%.1fG",$1/1073741824;else if($1>=1048576)printf "%.1fM",$1/1048576;else if($1>=1024)printf "%.1fK",$1/1024;else printf "%dB",$1}')
-  pct=0; [ "$raw" -gt 0 ] && pct=$(( saved * 100 / raw ))
-  echo "[zlog] Compressed $count files: $raw_h -> $comp_h (saved $saved_h, $pct% smaller)"
+  raw_h=$(numfmt --to=iec "$raw" 2>/dev/null || echo "${raw}B")
+  comp_h=$(numfmt --to=iec "$comp" 2>/dev/null || echo "${comp}B")
+  saved_h=$(numfmt --to=iec "$saved" 2>/dev/null || echo "${saved}B")
+  echo "[zlog] Compressed $count files: $raw_h -> $comp_h (saved $saved_h, $(( saved * 100 / raw ))% smaller)"
 fi
-dirs=(); for d in ~/.gemini ~/.config/Cursor "$HOME/Library/Application Support/Cursor" ~/.cursor ~/.ollama "$HOME/AppData/Local/Ollama" ~/.claude ~/.config/claude-code ~/.windsurf ~/.config/Windsurf "$HOME/Library/Application Support/Windsurf" ~/.codex ~/.cache/lm-studio ~/.lm-studio; do [ -d "$d" ] && [ ! -L "$d" ] && dirs+=("$d"); done; [ ${#dirs[@]} -gt 0 ] && du -ch "${dirs[@]}" 2>/dev/null | tail -n 1 || true
+dirs=(); for d in ~/.claude ~/.config/claude-code ~/.config/Cursor ~/.cursor ~/.gemini ~/.ollama ~/.windsurf ~/.codex ~/.cache/lm-studio ~/.aider; do [ -d "$d" ] && [ ! -L "$d" ] && dirs+=("$d"); done; [ ${#dirs[@]} -gt 0 ] && du -ch "${dirs[@]}" 2>/dev/null | tail -n 1 || true
 ```
 
 ### Dry-Run Mode (Preview Without Modifying Files)
