@@ -27,7 +27,8 @@ function zlogIsProtected($name) {
 }
 
 function zlogIsJunk($fullPath) {
-  foreach ($j in $junk) { if ($fullPath -like "*$j*") { return $true } }
+  $pn = $fullPath -replace '/', '\'
+  foreach ($j in $junk) { if ($pn -like "*$j*") { return $true } }
   return $false
 }
 

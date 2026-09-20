@@ -58,7 +58,7 @@ jobs:
               print(("✓ " if cond else "FAIL: ") + msg)
               if not cond: ok = False
           check("find -L" not in sh, "scripts/zlog.sh never follows symlinks")
-          check(sh.count("prune=(-name") == 1, "single canonical prune definition")
+          check(sh.count("prune=(-name") + sh.count("PRUNE=(-name") == 1, "single canonical prune definition")
           check("77%" not in skill and "77%" not in readme, "no unmeasured % claims in docs")
           check("4-5x" not in skill and "4-5x" not in readme, "no ratio claims in docs")
           check("local/bin/zlog" not in skill and "local/bin/zlog" not in readme, "no stale CLI refs")
