@@ -60,7 +60,7 @@ jobs:
           check("find -L" not in sh, "scripts/zlog.sh never follows symlinks")
           check(sh.count("prune=(-name") + sh.count("PRUNE=(-name") == 1, "single canonical prune definition")
           check(sh.count("zlog_candidates() {") == 1, "single candidate definition (no duplicate)")
-          check("mv -f \"$tmp\"" not in sh, "no clobbering rename in compress path (dest-absent required)")
+          check("mv -f" not in sh, "never overwrites an existing path (dest-absent + no-clobber everywhere)")
           check("Move-Item -Force" not in open("scripts/zlog.ps1").read(), "no clobbering move on Windows")
           check("*/AppData/*\"" not in sh, "deep scan has no broad AppData path")
           check("AppData/Local/Ollama" in sh, "deep scan keeps approved Ollama AppData path")

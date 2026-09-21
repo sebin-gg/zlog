@@ -15,29 +15,19 @@ function zlogFmt($b) { if ($b -ge 1073741824) { "{0:N1}G" -f ($b/1073741824) } e
 # 5.1-safe lock probe (inline try/catch is a statement and illegal inside Where-Object on 5.1)
 function zlogFree($p) { try { $s = [System.IO.File]::Open($p, 'Open', 'ReadWrite', 'None'); $s.Close(); $true } catch { $false } }
 
-# Source identity for TOCTOU checks: length + timestamps + partial content
-# hash (first/last 64KB). Stronger than size+mtime alone: a same-size
-# in-place rewrite with a restored timestamp cannot pass unnoticed unless
-# the content is also byte-identical. Returns $null when unreadable.
+# Source identity for TOCTOU checks: length + timestamps + full-content
+# SHA-256. Content hashing means a same-size in-place rewrite with
+# restored timestamps still cannot pass unnoticed. Returns $null when
+# unreadable (caller preserves the source).
 function zlogIdent($p) {
   try {
     $it = Get-Item $p -ErrorAction Stop
-    $len = $it.Length
-    $pre = "$len|$($it.LastWriteTimeUtc.Ticks)|$($it.CreationTimeUtc.Ticks)"
+    $pre = "$($it.Length)|$($it.LastWriteTimeUtc.Ticks)|$($it.CreationTimeUtc.Ticks)"
     $fs = [System.IO.File]::Open($p, 'Open', 'Read', 'ReadWrite')
     try {
       $h = [System.Security.Cryptography.SHA256]::Create()
-      $buf = New-Object byte[] 65536
-      $n1 = $fs.Read($buf, 0, 65536)
-      if ($n1 -gt 0) { [void]$h.TransformBlock($buf, 0, $n1, $buf, 0) }
-      if ($len -gt 65536) {
-        [void]$fs.Seek(-65536, [System.IO.SeekOrigin]::End)
-        $n2 = $fs.Read($buf, 0, 65536)
-        if ($n2 -gt 0) { [void]$h.TransformBlock($buf, 0, $n2, $buf, 0) }
-      }
-      [void]$h.TransformFinalBlock($buf, 0, 0)
-      $hash = [BitConverter]::ToString($h.Hash).Replace('-', '')
-      $h.Dispose()
+      try { $hash = [BitConverter]::ToString($h.ComputeHash($fs)).Replace('-', '') }
+      finally { $h.Dispose() }
     } finally { $fs.Close() }
     return "$pre|$hash"
   } catch { return $null }

@@ -16,7 +16,7 @@ candidate
   → smaller than source? (no → drop temp, NOT_BENEFICIAL)
   → destination archive already exists? (yes → drop temp, UNSAFE-SKIP)
   → source identity unchanged since scan? (POSIX: inode/size/mtime;
-     Windows: size/timestamps/partial-content hash; no → drop temp, FAILED)
+     Windows: size/timestamps/full-content SHA-256; no → drop temp, FAILED)
   → publish without overwriting (hardlink/.NET move, fails if raced)
   → source still unchanged? (no → remove just-published archive, FAILED)
   → delete source

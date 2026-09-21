@@ -10,8 +10,9 @@
 | Windows PowerShell | `file.log.tar.gz` | `tar.exe -czf`, single entry, size-checked |
 
 Every archive is written to a temp name first (`.$PID.tmp.*`), tested,
-required to be smaller than the source, then atomically renamed. The
-source is deleted only after the rename succeeds.
+required to be smaller than the source, then published without
+overwriting any existing file (POSIX hardlink / no-clobber move,
+Windows .NET move), and only then is the source deleted.
 
 ## Read / search without restoring
 
@@ -27,8 +28,11 @@ Ask the agent ("restore my Cursor log") or run the helper directly:
 - POSIX: `scripts/zlog.sh restore <archive>...`
 - Windows: `scripts/zlog.ps1 restore <archive>...`
 
-Rules: the destination must not already exist; multi-entry `.tar.gz`
-files are refused; the archive is preserved unless you delete it.
+Rules: the destination must not already exist (restores never overwrite);
+single-entry `.tar.gz` members must exactly match the intended basename
+(traversal, absolute, and wrong-name entries are refused); stream
+formats decode to a temp file first so a failed decompression never
+leaves a partial file; the archive is preserved unless you delete it.
 
 ## Deliberately unsupported
 

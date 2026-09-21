@@ -282,14 +282,16 @@ do_restore() {
       *.tar.gz)
         # Created by tar -czf with a single entry. Require exactly one
         # member whose name equals the intended basename, extract to a
-        # temp dir, and move the entry out. Anything else is UNSAFE-SKIP.
+        # temp dir, and publish without overwriting. Anything else is
+        # UNSAFE-SKIP. (No clobbering move anywhere in this script.)
         tmpd="$out.$$.restore.dir"; tmpf="$tmpd/$(basename "$out")"
         if [ "$(tar -tzf "$a" 2>/dev/null | wc -l)" -eq 1 ] \
           && [ "$(tar -tzf "$a" 2>/dev/null)" = "$(basename "$out")" ] \
           && mkdir -p "$tmpd" 2>/dev/null && tar -xzf "$a" -C "$tmpd" 2>/dev/null \
-          && [ -f "$tmpf" ] && [ ! -L "$tmpf" ] && mv -f "$tmpf" "$out" 2>/dev/null; then rc=0;
+          && [ -f "$tmpf" ] && [ ! -L "$tmpf" ] && [ ! -e "$out" ] \
+          && ln "$tmpf" "$out" 2>/dev/null && rm -f "$tmpf" 2>/dev/null; then rc=0;
         else
-          echo "[zlog] UNSAFE-SKIP (member mismatch or multi-entry): $a" >&2
+          echo "[zlog] UNSAFE-SKIP (member mismatch, multi-entry, or destination busy): $a" >&2
         fi
         rm -rf "$tmpd" 2>/dev/null
         ;;

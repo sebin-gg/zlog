@@ -51,6 +51,26 @@
   fixtures asserting no output and no temp leftovers.
 - POSIX `deep` end-to-end fixture added (fake HOME).
 
+## Unreleased (review follow-up 2: identity, no-clobber restore, race test)
+
+- PowerShell source identity is now length + timestamps + full-content
+  SHA-256 (was first/last-64KB partial hash): a same-size in-place
+  rewrite with restored timestamps is detected. Content hashing is the
+  right identity here — the danger is changed bytes, not a changed
+  inode, and identical bytes are safe to archive either way.
+- POSIX TAR restore publishes via hardlink instead of `mv -f`, so no
+  `mv -f` remains anywhere in `scripts/zlog.sh`; the CI invariant now
+  bans clobbering moves codebase-wide. One rule: never overwrite an
+  existing path.
+- `references/formats.md` no longer says "atomically renamed": publish
+  is described as without-overwrite (POSIX hardlink/no-clobber,
+  Windows .NET move), with member validation and temp-file decode.
+- Windows race fixture added: a shadowing `tar.exe` function flips one
+  middle byte mid-compression while preserving size and timestamps —
+  the exact case size+mtime checks miss — and asserts the source is
+  preserved with `FAILED (source changed during compression)`. A probe
+  gate skips cleanly where function shadowing is unavailable.
+
 ## Unreleased (v2.0.0: skill architecture — brain + scripts + references + tests)
 
 - `SKILL.md` rewritten as the decision brain (Purpose, Use When,

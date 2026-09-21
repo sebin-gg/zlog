@@ -127,6 +127,55 @@ Check 'deep says alias' { $d -match 'same operation as clean' }
 Check 'deep archived' { (-not (Test-Path (Join-Path $r 'deepfix.log'))) -and (Test-Path (Join-Path $r 'deepfix.log.tar.gz')) }
 Check 'deep report line present' { $d -match '^\[zlog\] mode=clean' }
 
+Write-Output '--- race (same-size mutation mid-compression -> preserved) ---'
+$realTarCmd = Get-Command tar.exe -ErrorAction SilentlyContinue
+if (-not $realTarCmd) { Write-Output 'SKIP: race test (no tar.exe)' }
+else {
+  $realTarBin = $realTarCmd.Source
+  $probePs1 = Join-Path $r 'shadowprobe.ps1'
+  '@(& tar.exe --version)' | Out-File -FilePath $probePs1 -Encoding ascii -Force
+  function tar.exe {
+    $global:zlogShadowHit = $true
+    # tar is invoked as: tar -czf <tmp> -C <dir> <name> — the *.log arg
+    # is a bare name resolved against the preceding -C directory.
+    for ($i = 0; $i -lt $args.Count; $i++) {
+      $cand = $null
+      if ($args[$i] -eq '-C' -and ($i + 2 -lt $args.Count) -and ($args[$i + 2] -like '*.log')) {
+        $cand = Join-Path $args[$i + 1] $args[$i + 2]
+      } elseif ($args[$i] -like '*.log' -and (Test-Path $args[$i] -PathType Leaf)) {
+        $cand = $args[$i]
+      }
+      if ($cand -and (Test-Path $cand -PathType Leaf)) {
+        try {
+          $it = Get-Item $cand
+          $wt = $it.LastWriteTime; $ct = $it.CreationTime
+          $b = [IO.File]::ReadAllBytes($cand)
+          if ($b.Length -gt 6000) { $b[5000] = [byte](($b[5000] + 1) % 256) }
+          [IO.File]::WriteAllBytes($cand, $b)
+          $it2 = Get-Item $cand
+          $it2.LastWriteTime = $wt; $it2.CreationTime = $ct
+        } catch {}
+      }
+    }
+    & $realTarBin @args
+  }
+  & $probePs1 2>$null | Out-Null
+  if (-not $global:zlogShadowHit) { Write-Output 'SKIP: race test (function shadowing unavailable)' }
+  else {
+    BigFile (Join-Path $r 'race.log') 20 24
+    (Get-Item (Join-Path $r 'race.log')).LastWriteTime = (Get-Date).AddMinutes(-5)
+    $raceOut = @(& $Script clean)
+    $raceOut | ForEach-Object { Write-Output $_ }
+    Check 'race source preserved' { Test-Path (Join-Path $r 'race.log') }
+    Check 'race no archive' { -not (Test-Path (Join-Path $r 'race.log.tar.gz')) }
+    Check 'race reported' { $raceOut -match 'source changed' }
+    Remove-Item (Join-Path $r 'race.log') -Force -ErrorAction SilentlyContinue
+  }
+  Remove-Item function:tar.exe -ErrorAction SilentlyContinue
+  Remove-Variable zlogShadowHit -Scope Global -ErrorAction SilentlyContinue
+  Remove-Item $probePs1 -Force -ErrorAction SilentlyContinue
+}
+
 Remove-Item $base -Recurse -Force -ErrorAction SilentlyContinue
 Remove-Item Env:\ZLOG_TEST_ROOT -ErrorAction SilentlyContinue
 if ($fail -eq 0) { Write-Output 'POWERSHELL TESTS ALL PASS' } else { Write-Output 'POWERSHELL TESTS FAILED'; exit 1 }
