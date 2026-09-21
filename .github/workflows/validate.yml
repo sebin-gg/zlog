@@ -97,6 +97,22 @@ jobs:
       - name: Require TOCTOU race regression (must run, not skip)
         run: |
           grep -q 'PASS: race source preserved' "$RUNNER_TEMP/posix-tests.txt" || { echo 'Error: POSIX race regression did not run'; exit 1; }
+  behavior-macos:
+    name: Behavioral fixture tests (macOS)
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4 pinned
+      - name: Ensure zstd (race fixture)
+        run: command -v zstd >/dev/null || brew install zstd
+      - name: POSIX destructive-behavior fixtures
+        run: |
+          set -o pipefail
+          bash tests/test-posix.sh scripts/zlog.sh | tee "$RUNNER_TEMP/posix-tests.txt"
+      - name: Installer integration fixtures (stage/backup/rollback)
+        run: bash tests/test-install.sh
+      - name: Require TOCTOU race regression (must run, not skip)
+        run: |
+          grep -q 'PASS: race source preserved' "$RUNNER_TEMP/posix-tests.txt" || { echo 'Error: macOS race regression did not run'; exit 1; }
   behavior-windows:
     name: Behavioral fixture tests (Windows)
     runs-on: windows-latest

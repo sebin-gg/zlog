@@ -8,6 +8,14 @@ export HOME="$FX/home" ZLOG_TEST_ROOT="$FX/home/.claude"
 OUT="$FX/outside"
 mkdir -p "$ZLOG_TEST_ROOT/node_modules" "$HOME/.cursor" "$OUT"
 
+# Portable helpers (Linux + macOS + Git Bash + WSL):
+# BSD touch lacks -d, BSD systems lack md5sum.
+touch_old() {
+  python3 -c 'import os,sys,time; t=time.time()-300
+for p in sys.argv[1:]: os.utime(p,(t,t))' "$@"
+}
+fsum() { if command -v md5sum >/dev/null 2>&1; then md5sum "$@"; else md5 "$@"; fi }
+
 python3 -c "open('$ZLOG_TEST_ROOT/ok.log','w').write('compressible log line\n'*2000)"
 head -c 20480 /dev/urandom > "$ZLOG_TEST_ROOT/noise.log"
 head -c 20480 /dev/urandom > "$OUT/secret.log"
@@ -25,7 +33,7 @@ head -c 20480 /dev/urandom > "$ZLOG_TEST_ROOT/keep.jsonl"
 head -c 20480 /dev/urandom > "$ZLOG_TEST_ROOT/transcript.log"
 head -c 20480 /dev/urandom > "$ZLOG_TEST_ROOT/data.sqlite-wal"
 head -c 20480 /dev/urandom > "$ZLOG_TEST_ROOT/small.log"
-touch -d '5 minutes ago' "$ZLOG_TEST_ROOT/ok.log" "$ZLOG_TEST_ROOT/noise.log" \
+touch_old "$ZLOG_TEST_ROOT/ok.log" "$ZLOG_TEST_ROOT/noise.log" \
   "$OUT/secret.log" "$ZLOG_TEST_ROOT/stale.log" "$ZLOG_TEST_ROOT/stale.log.zst" \
   "$ZLOG_TEST_ROOT/oldempty.log" "$ZLOG_TEST_ROOT/node_modules/junk.log" \
   "$ZLOG_TEST_ROOT/keep.jsonl" "$ZLOG_TEST_ROOT/transcript.log" \
@@ -66,13 +74,13 @@ check "restored" "[ -f $ZLOG_TEST_ROOT/ok.log ] && [ -f \"$ARCH\" ]"
 check "restore refuses existing dest" "! bash \"$ZLOG_SH\" restore \"$ARCH\""
 
 echo "--- deep-preview read-only ---"
-before=$(find "$HOME" | sort | md5sum)
+before=$(find "$HOME" | sort | fsum)
 bash "$ZLOG_SH" deep-preview > /dev/null
-check "deep-preview changes nothing" "[ \"\$(find $HOME | sort | md5sum)\" = \"$before\" ]"
+check "deep-preview changes nothing" "[ \"\$(find $HOME | sort | fsum)\" = \"$before\" ]"
 
 echo "--- collision (existing dest → UNSAFE-SKIP, source preserved) ---"
 python3 -c "open('$ZLOG_TEST_ROOT/collide.log','w').write('compressible log line\n'*2000)"
-touch -d '5 minutes ago' "$ZLOG_TEST_ROOT/collide.log"
+touch_old "$ZLOG_TEST_ROOT/collide.log"
 echo "pre-existing-dest" > "$ZLOG_TEST_ROOT/collide.log.zst"
 echo "pre-existing-dest" > "$ZLOG_TEST_ROOT/collide.log.gz"
 echo "pre-existing-dest" > "$ZLOG_TEST_ROOT/collide.log.xz"
@@ -94,7 +102,7 @@ if command -v zstd >/dev/null 2>&1; then
   printf '#!/bin/bash\nfor a in "$@"; do case "$a" in *.log) [ -f "$a" ] && echo RACE >> "$a" ;; esac; done\nexec "%s" "$@"\n' "$REAL_ZSTD" > "$FX/fakebin/zstd"
   chmod +x "$FX/fakebin/zstd"
   python3 -c "open('$ZLOG_TEST_ROOT/race.log','w').write('compressible log line\n'*2000)"
-  touch -d '5 minutes ago' "$ZLOG_TEST_ROOT/race.log"
+  touch_old "$ZLOG_TEST_ROOT/race.log"
   PATH="$FX/fakebin:$PATH" bash "$ZLOG_SH" clean > "$FX/clean3.txt"; cat "$FX/clean3.txt"
   check "race source preserved" "[ -f $ZLOG_TEST_ROOT/race.log ]"
   check "race no archive" "[ ! -e $ZLOG_TEST_ROOT/race.log.zst ] && [ ! -e $ZLOG_TEST_ROOT/race.log.gz ] && [ ! -e $ZLOG_TEST_ROOT/race.log.xz ]"
@@ -143,12 +151,12 @@ rm -f "$ZLOG_TEST_ROOT/corrupt2.log.gz"
 
 echo "--- deep scan end-to-end (fake HOME) ---"
 python3 -c "open('$ZLOG_TEST_ROOT/deepfix.log','w').write('compressible log line\n'*2000)"
-touch -d '5 minutes ago' "$ZLOG_TEST_ROOT/deepfix.log"
+touch_old "$ZLOG_TEST_ROOT/deepfix.log"
 bash "$ZLOG_SH" deep-preview > "$FX/deepprev.txt"
 check "deep-preview lists candidate" "grep -q deepfix.log \"\$FX/deepprev.txt\""
-before=$(find "$HOME" | sort | md5sum)
+before=$(find "$HOME" | sort | fsum)
 bash "$ZLOG_SH" deep-preview > /dev/null
-check "deep-preview still read-only" "[ \"\$(find $HOME | sort | md5sum)\" = \"$before\" ]"
+check "deep-preview still read-only" "[ \"\$(find $HOME | sort | fsum)\" = \"$before\" ]"
 bash "$ZLOG_SH" deep > "$FX/deep.txt"; cat "$FX/deep.txt"
 check "deep archived" "[ ! -f $ZLOG_TEST_ROOT/deepfix.log ] && ls $ZLOG_TEST_ROOT/deepfix.log.* >/dev/null"
 check "deep report line present" "grep -q '^\\[zlog\\] mode=deep' \"\$FX/deep.txt\""
@@ -157,7 +165,7 @@ echo "--- missing compressors (all fail → source preserved) ---"
 mkdir -p "$FX/nocomp"
 for t in zstd xz gzip; do printf '#!/bin/bash\nexit 1\n' > "$FX/nocomp/$t"; chmod +x "$FX/nocomp/$t"; done
 python3 -c "open('$ZLOG_TEST_ROOT/nocomp.log','w').write('compressible log line\n'*2000)"
-touch -d '5 minutes ago' "$ZLOG_TEST_ROOT/nocomp.log"
+touch_old "$ZLOG_TEST_ROOT/nocomp.log"
 PATH="$FX/nocomp:$PATH" bash "$ZLOG_SH" clean > "$FX/clean4.txt"; cat "$FX/clean4.txt"
 check "nocomp source preserved" "[ -f $ZLOG_TEST_ROOT/nocomp.log ]"
 check "nocomp no archive" "[ ! -e $ZLOG_TEST_ROOT/nocomp.log.zst ] && [ ! -e $ZLOG_TEST_ROOT/nocomp.log.gz ] && [ ! -e $ZLOG_TEST_ROOT/nocomp.log.xz ]"
@@ -167,14 +175,14 @@ echo "--- newline filename ---"
 NLFILE="$ZLOG_TEST_ROOT/nl
 name.log"
 python3 -c "open('$ZLOG_TEST_ROOT/nl\nname.log','w').write('compressible log line\n'*2000)"
-touch -d '5 minutes ago' "$NLFILE"
+touch_old "$NLFILE"
 bash "$ZLOG_SH" clean > "$FX/clean5.txt"; cat "$FX/clean5.txt"
 check "newline archived" "[ ! -e \"\$NLFILE\" ] && (ls \"$ZLOG_TEST_ROOT\" | grep -q 'nl')"
 check "newline no tmp leftovers" "[ -z \"\$(ls $ZLOG_TEST_ROOT/ | grep 'tmp\\.' || true)\" ]"
 
 echo "--- leading-dash filename (never lost, whatever tar decides) ---"
 python3 -c "open('$ZLOG_TEST_ROOT/-dash.log','w').write('compressible log line\n'*2000)"
-touch -d '5 minutes ago' "$ZLOG_TEST_ROOT/-dash.log"
+touch_old "$ZLOG_TEST_ROOT/-dash.log"
 bash "$ZLOG_SH" clean > "$FX/clean-dash.txt"; cat "$FX/clean-dash.txt"
 check "dash never lost" "[ -f $ZLOG_TEST_ROOT/-dash.log ] || ls $ZLOG_TEST_ROOT/-dash.log.* >/dev/null"
 check "dash no tmp leftovers" "[ -z \"\$(ls $ZLOG_TEST_ROOT/ | grep 'tmp\\.' || true)\" ]"
@@ -182,14 +190,14 @@ check "dash no tmp leftovers" "[ -z \"\$(ls $ZLOG_TEST_ROOT/ | grep 'tmp\\.' || 
 echo "--- hardlinks compress independently ---"
 python3 -c "open('$ZLOG_TEST_ROOT/hard1.log','w').write('compressible log line\n'*2000)"
 ln "$ZLOG_TEST_ROOT/hard1.log" "$ZLOG_TEST_ROOT/hard2.log"
-touch -d '5 minutes ago' "$ZLOG_TEST_ROOT/hard1.log" "$ZLOG_TEST_ROOT/hard2.log"
+touch_old "$ZLOG_TEST_ROOT/hard1.log" "$ZLOG_TEST_ROOT/hard2.log"
 bash "$ZLOG_SH" clean > "$FX/clean6.txt"; cat "$FX/clean6.txt"
 check "hardlinks both handled" "[ ! -e $ZLOG_TEST_ROOT/hard1.log ] && [ ! -e $ZLOG_TEST_ROOT/hard2.log ]"
 check "hardlinks archives exist" "ls $ZLOG_TEST_ROOT/hard1.log.* >/dev/null && ls $ZLOG_TEST_ROOT/hard2.log.* >/dev/null"
 
 echo "--- permission failure (unreadable source → preserved) ---"
 python3 -c "open('$ZLOG_TEST_ROOT/noperm.log','w').write('compressible log line\n'*2000)"
-touch -d '5 minutes ago' "$ZLOG_TEST_ROOT/noperm.log"
+touch_old "$ZLOG_TEST_ROOT/noperm.log"
 chmod 000 "$ZLOG_TEST_ROOT/noperm.log"
 if cat "$ZLOG_TEST_ROOT/noperm.log" >/dev/null 2>&1 && [ "$(id -u)" -eq 0 ]; then
   echo "SKIP: permission test (running as root)"
