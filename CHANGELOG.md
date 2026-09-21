@@ -114,6 +114,11 @@
   mtime helper instead of GNU `touch -d`, `md5` fallback for missing
   `md5sum`); the implementation needed no changes. README/SKILL.md
   now list macOS as tested — every supported platform is covered.
+- Social card refreshed: stale "tested on Linux" claims replaced with
+  all four platforms, "High-Ratio" replaced with verified-compression
+  wording, all 8 runtimes named, safety card reflects protected data;
+  compatibility badge now lists Linux, macOS, Windows 11. PNG
+  re-rendered from the SVG at 1200x630.
 
 ## Unreleased (v2.0.0: skill architecture — brain + scripts + references + tests)
 
