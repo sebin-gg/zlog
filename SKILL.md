@@ -2,7 +2,7 @@
 name: zlog
 description: Compresses stale AI agent session logs (Claude Code, Cursor, Gemini, Codex, Ollama, Windsurf, LM Studio, Aider) to save disk space. Reclaims space from .log/.out/.trace files while protecting transcripts, configs, and live databases. Never touches conversation history, SQLite stores, or files being written. Use when the user asks to clean, compress, preview, restore, or scan for AI logs at session wrap-up.
 license: MIT
-compatibility: Linux, Windows 11 (Bash, Zsh, Git Bash, PowerShell)
+compatibility: Linux, WSL, Windows 11 (Bash, Zsh, Git Bash, PowerShell)
 allowed-tools: Bash(scripts/zlog.sh:*) Read Write
 metadata:
   version: "2.0.0"

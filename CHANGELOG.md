@@ -104,6 +104,11 @@
 - Leading-dash filename fixture (`-dash.log`): asserts the file is
   never lost without an archive, whatever the platform `tar` decides
   to do with a dash-prefixed member name.
+- WSL runtime-tested: the full POSIX suite (zero skips, incl. the
+  `zstd` race section via a rootless install) and the installer suite
+  pass on Debian WSL2. That box has no `fuser`/`lsof`, so the run also
+  covers the age-buffer fallback. README/SKILL.md now list WSL as
+  tested; macOS remains untested (no host).
 
 ## Unreleased (v2.0.0: skill architecture — brain + scripts + references + tests)
 
