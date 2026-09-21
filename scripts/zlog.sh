@@ -90,6 +90,20 @@ zlog_ident() {
   return 1
 }
 
+# Publish a temp file as its final name without overwriting anything.
+# Temp and dest are always in the same directory (same filesystem), so a
+# hardlink fails atomically when the destination exists; the mv -n
+# fallback covers filesystems without hardlink support. Returns 0 only
+# when dest now holds the content and tmp is gone. This is the single
+# publish path for every destructive operation in this script.
+zlog_publish() {
+  [ ! -e "$2" ] || return 1
+  if ln "$1" "$2" 2>/dev/null; then rm -f "$1" 2>/dev/null; return 0; fi
+  [ ! -e "$2" ] || return 1
+  if mv -n "$1" "$2" 2>/dev/null && [ -e "$2" ] && [ ! -e "$1" ]; then return 0; fi
+  return 1
+}
+
 # Transactional compression of one file.
 # Sets ZLOG_STATUS to: COMPRESSED | UNSAFE-SKIP | FAILED | NOT_BENEFICIAL
 # and ZLOG_NEW / ZLOG_NEWSIZE on success. Never overwrites an existing
@@ -133,13 +147,8 @@ zlog_compress_one() {
     ZLOG_STATUS="NOT_BENEFICIAL"
     return 0
   fi
-  # Publish without overwriting: hardlink tmp to dest fails if dest exists
-  # (same directory, so same filesystem). Falls back to no-clobber move.
-  if ln "$tmp" "$dest" 2>/dev/null; then
-    rm -f "$tmp" 2>/dev/null
-  elif mv -n "$tmp" "$dest" 2>/dev/null && [ -e "$dest" ] && [ ! -e "$tmp" ]; then
-    :
-  else
+  # Publish without overwriting (single rule on every destructive path).
+  if ! zlog_publish "$tmp" "$dest"; then
     rm -f "$tmp" 2>/dev/null
     ZLOG_STATUS="UNSAFE-SKIP"
     echo "[zlog] UNSAFE-SKIP (destination exists): $dest (source preserved)"
@@ -289,7 +298,7 @@ do_restore() {
           && [ "$(tar -tzf "$a" 2>/dev/null)" = "$(basename "$out")" ] \
           && mkdir -p "$tmpd" 2>/dev/null && tar -xzf "$a" -C "$tmpd" 2>/dev/null \
           && [ -f "$tmpf" ] && [ ! -L "$tmpf" ] && [ ! -e "$out" ] \
-          && ln "$tmpf" "$out" 2>/dev/null && rm -f "$tmpf" 2>/dev/null; then rc=0;
+          && zlog_publish "$tmpf" "$out"; then rc=0;
         else
           echo "[zlog] UNSAFE-SKIP (member mismatch, multi-entry, or destination busy): $a" >&2
         fi
@@ -299,13 +308,13 @@ do_restore() {
       # failure must never leave a partial file at the destination.
       *.zst) tmp="$out.$$.tmp.restore"; rm -f "$tmp" 2>/dev/null
         if command -v zstd >/dev/null 2>&1 && zstd -d -q "$a" -o "$tmp" 2>/dev/null \
-          && [ -s "$tmp" ] && mv "$tmp" "$out" 2>/dev/null; then rc=0; else rc=1; rm -f "$tmp" 2>/dev/null; fi ;;
+          && [ -s "$tmp" ] && zlog_publish "$tmp" "$out"; then rc=0; else rc=1; rm -f "$tmp" 2>/dev/null; fi ;;
       *.gz) tmp="$out.$$.tmp.restore"; rm -f "$tmp" 2>/dev/null
         if gzip -d -c "$a" > "$tmp" 2>/dev/null \
-          && [ -s "$tmp" ] && mv "$tmp" "$out" 2>/dev/null; then rc=0; else rc=1; rm -f "$tmp" 2>/dev/null; fi ;;
+          && [ -s "$tmp" ] && zlog_publish "$tmp" "$out"; then rc=0; else rc=1; rm -f "$tmp" 2>/dev/null; fi ;;
       *.xz) tmp="$out.$$.tmp.restore"; rm -f "$tmp" 2>/dev/null
         if command -v xz >/dev/null 2>&1 && xz -d -c "$a" > "$tmp" 2>/dev/null \
-          && [ -s "$tmp" ] && mv "$tmp" "$out" 2>/dev/null; then rc=0; else rc=1; rm -f "$tmp" 2>/dev/null; fi ;;
+          && [ -s "$tmp" ] && zlog_publish "$tmp" "$out"; then rc=0; else rc=1; rm -f "$tmp" 2>/dev/null; fi ;;
     esac
     if [ "$rc" -eq 0 ] && [ -s "$out" ]; then echo "[zlog] RESTORED: $out (archive preserved)"; ok=$((ok + 1)); else rm -f "$out" 2>/dev/null; echo "[zlog] FAILED: $a (nothing written)"; fail=$((fail + 1)); fi
   done

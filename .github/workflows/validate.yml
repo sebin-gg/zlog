@@ -61,6 +61,7 @@ jobs:
           check(sh.count("prune=(-name") + sh.count("PRUNE=(-name") == 1, "single canonical prune definition")
           check(sh.count("zlog_candidates() {") == 1, "single candidate definition (no duplicate)")
           check("mv -f" not in sh, "never overwrites an existing path (dest-absent + no-clobber everywhere)")
+          check(sh.count("zlog_publish") >= 5, "all publishes go through the single no-clobber helper")
           check("Move-Item -Force" not in open("scripts/zlog.ps1").read(), "no clobbering move on Windows")
           check("*/AppData/*\"" not in sh, "deep scan has no broad AppData path")
           check("AppData/Local/Ollama" in sh, "deep scan keeps approved Ollama AppData path")

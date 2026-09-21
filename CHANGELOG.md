@@ -71,6 +71,14 @@
   preserved with `FAILED (source changed during compression)`. A probe
   gate skips cleanly where function shadowing is unavailable.
 
+## Unreleased (review follow-up 3: single publish helper)
+
+- All POSIX publishes (compression, TAR restore, stream restores) go
+  through one `zlog_publish()` helper: destination re-check, atomic
+  hardlink, `mv -n` fallback for filesystems without hardlinks. No
+  bare `mv` remains on any destructive path; CI asserts the helper is
+  used and bans `mv -f` codebase-wide.
+
 ## Unreleased (v2.0.0: skill architecture — brain + scripts + references + tests)
 
 - `SKILL.md` rewritten as the decision brain (Purpose, Use When,
