@@ -19,8 +19,11 @@ BigFile (Join-Path $r 'node_modules\junk.log') 20 13
 BigFile (Join-Path $r 'keep.jsonl') 20 14
 New-Item -ItemType File -Path (Join-Path $r 'oldempty.log') -Force | Out-Null
 New-Item -ItemType File -Path (Join-Path $r 'newempty.log') -Force | Out-Null
+New-Item -ItemType File -Path (Join-Path $r 'transcript_empty.log') -Force | Out-Null
+New-Item -ItemType File -Path (Join-Path $r 'history.log') -Force | Out-Null
+New-Item -ItemType File -Path (Join-Path $r 'conversation.out') -Force | Out-Null
 $old = (Get-Date).AddMinutes(-5)
-foreach ($f in @('ok.log','locked.log','node_modules\junk.log','keep.jsonl','oldempty.log')) { (Get-Item (Join-Path $r $f)).LastWriteTime = $old }
+foreach ($f in @('ok.log','locked.log','node_modules\junk.log','keep.jsonl','oldempty.log','transcript_empty.log','history.log','conversation.out')) { (Get-Item (Join-Path $r $f)).LastWriteTime = $old }
 $lk = [IO.File]::Open((Join-Path $r 'locked.log'), 'Open', 'ReadWrite', 'None')
 
 Write-Output '--- preview (must change nothing) ---'
@@ -37,6 +40,9 @@ Check 'junk kept' { Test-Path (Join-Path $r 'node_modules\junk.log') }
 Check 'jsonl kept' { Test-Path (Join-Path $r 'keep.jsonl') }
 Check 'old empty purged' { -not (Test-Path (Join-Path $r 'oldempty.log')) }
 Check 'fresh empty kept' { Test-Path (Join-Path $r 'newempty.log') }
+Check 'empty transcript protected' { Test-Path (Join-Path $r 'transcript_empty.log') }
+Check 'empty history protected' { Test-Path (Join-Path $r 'history.log') }
+Check 'empty conversation protected' { Test-Path (Join-Path $r 'conversation.out') }
 Check 'report line present' { $cleanOut -match '^\[zlog\] mode=clean' }
 
 Write-Output '--- restore ---'

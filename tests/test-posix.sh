@@ -17,6 +17,9 @@ head -c 20480 /dev/urandom > "$ZLOG_TEST_ROOT/stale.log"
 head -c 100 /dev/urandom > "$ZLOG_TEST_ROOT/stale.log.zst"
 : > "$ZLOG_TEST_ROOT/oldempty.log"
 : > "$ZLOG_TEST_ROOT/newempty.log"
+: > "$ZLOG_TEST_ROOT/transcript_empty.log"
+: > "$ZLOG_TEST_ROOT/history.log"
+: > "$ZLOG_TEST_ROOT/conversation.out"
 head -c 20480 /dev/urandom > "$ZLOG_TEST_ROOT/node_modules/junk.log"
 head -c 20480 /dev/urandom > "$ZLOG_TEST_ROOT/keep.jsonl"
 head -c 20480 /dev/urandom > "$ZLOG_TEST_ROOT/transcript.log"
@@ -25,7 +28,9 @@ head -c 20480 /dev/urandom > "$ZLOG_TEST_ROOT/small.log"
 touch -d '5 minutes ago' "$ZLOG_TEST_ROOT/ok.log" "$ZLOG_TEST_ROOT/noise.log" \
   "$OUT/secret.log" "$ZLOG_TEST_ROOT/stale.log" "$ZLOG_TEST_ROOT/stale.log.zst" \
   "$ZLOG_TEST_ROOT/oldempty.log" "$ZLOG_TEST_ROOT/node_modules/junk.log" \
-  "$ZLOG_TEST_ROOT/keep.jsonl" "$ZLOG_TEST_ROOT/transcript.log"
+  "$ZLOG_TEST_ROOT/keep.jsonl" "$ZLOG_TEST_ROOT/transcript.log" \
+  "$ZLOG_TEST_ROOT/transcript_empty.log" "$ZLOG_TEST_ROOT/history.log" \
+  "$ZLOG_TEST_ROOT/conversation.out"
 
 fail=0
 check() { if eval "$2"; then echo "PASS: $1"; else echo "FAIL: $1"; fail=1; fi }
@@ -41,6 +46,9 @@ check "compressible archived" "[ ! -f $ZLOG_TEST_ROOT/ok.log ] && ls $ZLOG_TEST_
 check "symlink escape blocked" "[ -f $OUT/secret.log ] && [ ! -e $OUT/secret.log.zst ] && [ ! -e $OUT/secret.log.gz ] && [ ! -e $OUT/secret.log.xz ]"
 check "old empty purged" "[ ! -f $ZLOG_TEST_ROOT/oldempty.log ]"
 check "fresh empty kept" "[ -f $ZLOG_TEST_ROOT/newempty.log ]"
+check "empty transcript protected" "[ -f $ZLOG_TEST_ROOT/transcript_empty.log ]"
+check "empty history protected" "[ -f $ZLOG_TEST_ROOT/history.log ]"
+check "empty conversation protected" "[ -f $ZLOG_TEST_ROOT/conversation.out ]"
 check "junk kept" "[ -f $ZLOG_TEST_ROOT/node_modules/junk.log ]"
 check "high-entropy kept" "[ -f $ZLOG_TEST_ROOT/noise.log ]"
 check "stale artifact not counted" "[ -f $ZLOG_TEST_ROOT/stale.log ]"

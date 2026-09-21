@@ -56,9 +56,16 @@ zlog_candidates() {
 }
 
 zlog_purge_candidates() {
+  # Same protected-file rules as zlog_candidates (Class B always excluded),
+  # only the size test differs: empty files instead of +10k.
   find "$1" \( -type d \( "${PRUNE[@]}" \) -prune \) -o \( -type f \
     \( -name "*.log" -o -name "*.out" -o -name "*.trace" \) \
-    -not -name "*.tmp.*" -empty -mmin "$ZLOG_MMIN" -print0 \) 2>/dev/null
+    -not -name "*.gz" -not -name "*.zst" -not -name "*.xz" \
+    -not -name "*.tmp.*" -not -name "*.jsonl" \
+    -not -name "transcript*" -not -name "conversation*" -not -name "history*" \
+    -not -name "*.sqlite*" -not -name "*.db" -not -name "*.wal" -not -name "*.shm" \
+    -not -name "SKILL.md" -not -iname "README*" -not -iname "LICENSE*" \
+    -empty -mmin "$ZLOG_MMIN" -print0 \) 2>/dev/null
 }
 
 zlog_locked() {
