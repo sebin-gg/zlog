@@ -81,23 +81,23 @@ zlog_hum() {
 
 # Shared candidate engine. Prints NUL-delimited candidates for one root.
 # (Used by BOTH preview and clean — one engine, preview never disagrees.)
-zlog_candidates() {
-  find "$1" \( -type d \( "${PRUNE[@]}" \) -prune \) -o \( -type f \
-    \( -name "*.log" -o -name "*.out" -o -name "*.trace" \) \
-    -not -name "*.gz" -not -name "*.zst" -not -name "*.xz" \
-    -not -name "*.tmp.*" -not -name "*.jsonl" \
-    -not -name "transcript*" -not -name "conversation*" -not -name "history*" \
-    -not -name "*.sqlite*" -not -name "*.db" -not -name "*.wal" -not -name "*.shm" \
-    -not -name "SKILL.md" -not -iname "README*" -not -iname "LICENSE*" \
-    -size +10k -mmin "$ZLOG_MMIN" -print0 \) 2>/dev/null
+
+# Portable file identity: "inode size mtime" (Linux stat -c, macOS stat -f).
+zlog_ident() {
+  local i="" s="" m=""
+  if i=$(stat -c '%i %s %Y' "$1" 2>/dev/null); then printf '%s' "$i"; return 0; fi
+  if i=$(stat -f '%i %z %m' "$1" 2>/dev/null); then printf '%s' "$i"; return 0; fi
+  return 1
 }
 
 # Transactional compression of one file.
-# Sets ZLOG_STATUS to: COMPRESSED | LOCKED | FAILED | NOT_BENEFICIAL
-# and ZLOG_NEW / ZLOG_NEWSIZE on success.
+# Sets ZLOG_STATUS to: COMPRESSED | UNSAFE-SKIP | FAILED | NOT_BENEFICIAL
+# and ZLOG_NEW / ZLOG_NEWSIZE on success. Never overwrites an existing
+# archive; never deletes a source that changed during compression.
 zlog_compress_one() {
-  local f="$1" size="$2" tmp="" ext="" ok=0
+  local f="$1" size="$2" tmp="" ext="" ok=0 dest="" newsize="" pre="" cur=""
   ZLOG_STATUS="FAILED"; ZLOG_NEW=""; ZLOG_NEWSIZE=0
+  pre=$(zlog_ident "$f" 2>/dev/null) || { echo "[zlog] FAILED (source unreadable): $f (original preserved)"; return 0; }
   if command -v zstd >/dev/null 2>&1; then
     tmp="$f.$$.tmp.zst"
     if zstd -15 -q "$f" -o "$tmp" 2>/dev/null && zstd -t -q "$tmp" 2>/dev/null; then ext=zst; ok=1; else rm -f "$tmp" 2>/dev/null; fi
@@ -110,16 +110,51 @@ zlog_compress_one() {
     tmp="$f.$$.tmp.gz"
     if gzip -9 -c "$f" > "$tmp" 2>/dev/null && gzip -t "$tmp" 2>/dev/null; then ext=gz; ok=1; else rm -f "$tmp" 2>/dev/null; fi
   fi
-  [ "$ok" -eq 1 ] || return 0
-  local newsize
-  newsize=$(stat -c%s "$tmp" 2>/dev/null || stat -f%z "$tmp" 2>/dev/null) || newsize=0
-  if [ "$newsize" -gt 0 ] && [ "$newsize" -lt "$size" ] && mv -f "$tmp" "$f.$ext" 2>/dev/null; then
-    rm -f "$f" 2>/dev/null
-    ZLOG_STATUS="COMPRESSED"; ZLOG_NEW="$f.$ext"; ZLOG_NEWSIZE=$newsize
-  else
+  [ "$ok" -eq 1 ] || { echo "[zlog] FAILED (compressor error): $f (original preserved)"; return 0; }
+  dest="$f.$ext"
+  if [ -e "$dest" ]; then
+    rm -f "$tmp" 2>/dev/null
+    ZLOG_STATUS="UNSAFE-SKIP"
+    echo "[zlog] UNSAFE-SKIP (destination exists): $dest (source preserved)"
+    return 0
+  fi
+  cur=$(zlog_ident "$f" 2>/dev/null) || cur=""
+  if [ -z "$cur" ] || [ "$cur" != "$pre" ]; then
+    rm -f "$tmp" 2>/dev/null
+    ZLOG_STATUS="FAILED"
+    echo "[zlog] FAILED (source changed during compression): $f (original preserved)"
+    return 0
+  fi
+  newsize=$(stat -c%s "$tmp" 2>/dev/null || stat -f%z "$tmp" 2>/dev/null || echo 0)
+  newsize=${newsize:-0}
+  case "$newsize" in ''|*[!0-9]*) newsize=0 ;; esac
+  if [ "$newsize" -le 0 ] || [ "$newsize" -ge "$size" ]; then
     rm -f "$tmp" 2>/dev/null
     ZLOG_STATUS="NOT_BENEFICIAL"
+    return 0
   fi
+  # Publish without overwriting: hardlink tmp to dest fails if dest exists
+  # (same directory, so same filesystem). Falls back to no-clobber move.
+  if ln "$tmp" "$dest" 2>/dev/null; then
+    rm -f "$tmp" 2>/dev/null
+  elif mv -n "$tmp" "$dest" 2>/dev/null && [ -e "$dest" ] && [ ! -e "$tmp" ]; then
+    :
+  else
+    rm -f "$tmp" 2>/dev/null
+    ZLOG_STATUS="UNSAFE-SKIP"
+    echo "[zlog] UNSAFE-SKIP (destination exists): $dest (source preserved)"
+    return 0
+  fi
+  # Final check: source must still be identical before removal.
+  cur=$(zlog_ident "$f" 2>/dev/null) || cur=""
+  if [ -z "$cur" ] || [ "$cur" != "$pre" ]; then
+    rm -f "$dest" 2>/dev/null
+    ZLOG_STATUS="FAILED"
+    echo "[zlog] FAILED (source changed during compression): $f (original preserved)"
+    return 0
+  fi
+  rm -f "$f" 2>/dev/null
+  ZLOG_STATUS="COMPRESSED"; ZLOG_NEW="$dest"; ZLOG_NEWSIZE=$newsize
 }
 
 zlog_report() {
@@ -165,6 +200,7 @@ do_clean() {
       case "$ZLOG_STATUS" in
         COMPRESSED) raw=$((raw + s)); saved=$((saved + s - ZLOG_NEWSIZE)); compressed=$((compressed + 1)) ;;
         NOT_BENEFICIAL) notbene=$((notbene + 1)); skipped=$((skipped + 1)) ;;
+        UNSAFE-SKIP) skipped=$((skipped + 1)) ;;
         *) failed=$((failed + 1)) ;;
       esac
     done < <(zlog_candidates "$d") || true
@@ -181,7 +217,7 @@ DEEP_PATHS=(-path "*/.claude/*" -o -path "*/.config/claude-code/*" -o -path "*/.
   -o -path "*/.lmstudio/*" -o -path "*/.aider/*" \
   -o -path "*/Library/Application Support/Cursor/*" \
   -o -path "*/Library/Application Support/Windsurf/*" \
-  -o -path "*/.config/Windsurf/*" -o -path "*/AppData/*")
+  -o -path "*/.config/Windsurf/*" -o -path "*/AppData/Local/Ollama/*")
 
 zlog_deep_candidates() {
   # read-only candidate listing; caller decides preview vs clean
@@ -219,6 +255,7 @@ do_deep() {
     case "$ZLOG_STATUS" in
       COMPRESSED) raw=$((raw + s)); saved=$((saved + s - ZLOG_NEWSIZE)); compressed=$((compressed + 1)) ;;
       NOT_BENEFICIAL) notbene=$((notbene + 1)); skipped=$((skipped + 1)) ;;
+      UNSAFE-SKIP) skipped=$((skipped + 1)) ;;
       *) failed=$((failed + 1)) ;;
     esac
   done < <(zlog_deep_candidates) || true
@@ -243,12 +280,17 @@ do_restore() {
     rc=1
     case "$a" in
       *.tar.gz)
-        # created by tar -czf with a single entry: refuse multi-entry archives,
-        # extract to temp dir, move the entry out
+        # Created by tar -czf with a single entry. Require exactly one
+        # member whose name equals the intended basename, extract to a
+        # temp dir, and move the entry out. Anything else is UNSAFE-SKIP.
         tmpd="$out.$$.restore.dir"; tmpf="$tmpd/$(basename "$out")"
         if [ "$(tar -tzf "$a" 2>/dev/null | wc -l)" -eq 1 ] \
+          && [ "$(tar -tzf "$a" 2>/dev/null)" = "$(basename "$out")" ] \
           && mkdir -p "$tmpd" 2>/dev/null && tar -xzf "$a" -C "$tmpd" 2>/dev/null \
-          && [ -f "$tmpf" ] && mv -f "$tmpf" "$out" 2>/dev/null; then rc=0; fi
+          && [ -f "$tmpf" ] && [ ! -L "$tmpf" ] && mv -f "$tmpf" "$out" 2>/dev/null; then rc=0;
+        else
+          echo "[zlog] UNSAFE-SKIP (member mismatch or multi-entry): $a" >&2
+        fi
         rm -rf "$tmpd" 2>/dev/null
         ;;
       *.zst) command -v zstd >/dev/null 2>&1 && zstd -d -q "$a" -o "$out" 2>/dev/null && rc=0 ;;

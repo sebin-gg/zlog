@@ -11,7 +11,7 @@
   <a href="https://github.com/sebin-gg/zlog/stargazers"><img src="https://img.shields.io/github/stars/sebin-gg/zlog?style=social" alt="Stars"></a>
 </p>
 
-> **The universal zero-config log compressor for AI agent developers.** Compresses session logs across Claude Code, Cursor, Gemini CLI, Ollama, Windsurf, Codex, Aider & LM Studio while keeping 100% of conversation transcripts intact. Run the Dry-Run preview for your own savings numbers.
+> **The universal zero-config log compressor for AI agent developers.** Compresses session logs across Claude Code, Cursor, Gemini CLI, Ollama, Windsurf, Codex, Aider & LM Studio while excluding conversation transcripts, configs, and live databases by filter (best-effort protection — see `references/safety.md`). Run the Dry-Run preview for your own savings numbers.
 
 ---
 
@@ -39,7 +39,7 @@ curl -fsSL https://raw.githubusercontent.com/sebin-gg/zlog/main/install.sh | bas
 - **Process Lock Safe (best-effort)**: Checks kernel locks via `fuser -s` (Linux/WSL) or `lsof` (macOS), and `[System.IO.File]::Open` (Windows). If neither `fuser` nor `lsof` is available (minimal containers), safety falls back to a 60s age buffer — see FAQ.
 - **Memory Context Intact**: Transcripts, configs, and live databases are excluded by filter (see `references/safety.md` data classes).
 - **Single-Line Output**: Condenses multi-folder scan results into one clean line (`253M total`).
-- **Cross-Platform Parity**: Runs natively on Linux, macOS, WSL, and Windows 11 PowerShell (with savings reporting on all platforms).
+- **Cross-Platform Scripts**: POSIX (`scripts/zlog.sh`) and Windows 11 PowerShell (`scripts/zlog.ps1`) implementations with the same candidate rules and savings reporting. Linux and Windows 11 are tested (CI runs POSIX fixtures on Ubuntu and PowerShell fixtures on Windows); macOS/WSL ship with `stat -f` / `lsof` / Git Bash fallbacks but are not runtime-tested here.
 - **Junk-Pruned Hybrid Deep Scan**: Never descends into `Caches`/`node_modules`/GPU-cache junk or `.git`; capped at depth 12 — fast, future-proof, bounded. Compressed artifacts are verified before counting.
 
 ---

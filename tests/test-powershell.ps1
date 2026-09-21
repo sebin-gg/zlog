@@ -49,6 +49,55 @@ Write-Output '--- restore ---'
 & $Script restore (Join-Path $r 'ok.log.tar.gz') | Out-Null
 Check 'restored, archive kept' { (Test-Path (Join-Path $r 'ok.log')) -and (Test-Path (Join-Path $r 'ok.log.tar.gz')) }
 
+Write-Output '--- collision (existing dest -> UNSAFE-SKIP, source preserved) ---'
+BigFile (Join-Path $r 'collide.log') 20 21
+(Get-Item (Join-Path $r 'collide.log')).LastWriteTime = (Get-Date).AddMinutes(-5)
+'pre-existing-dest' | Out-File -FilePath (Join-Path $r 'collide.log.tar.gz') -Encoding ascii -Force
+$destBefore = (Get-Item (Join-Path $r 'collide.log.tar.gz')).Length
+$clean2 = @(& $Script clean)
+$clean2 | ForEach-Object { Write-Output $_ }
+Check 'collision source preserved' { Test-Path (Join-Path $r 'collide.log') }
+Check 'collision dest untouched' { (Get-Item (Join-Path $r 'collide.log.tar.gz')).Length -eq $destBefore }
+Check 'collision reported' { $clean2 -match 'UNSAFE-SKIP' }
+Remove-Item (Join-Path $r 'collide.log') -Force -ErrorAction SilentlyContinue
+Remove-Item (Join-Path $r 'collide.log.tar.gz') -Force -ErrorAction SilentlyContinue
+
+Write-Output '--- tar traversal / mismatch restore refused ---'
+$stage = Join-Path $r 'travstage'
+New-Item -ItemType Directory -Path (Join-Path $stage 'sub') -Force | Out-Null
+'evil' | Out-File -FilePath (Join-Path $stage 'evil.log') -Encoding ascii -Force
+& tar -czf (Join-Path $r 'trav.log.tar.gz') -C (Join-Path $stage 'sub') '../evil.log' 2>$null
+BigFile (Join-Path $r 'wrongname.log') 1 30
+& tar -czf (Join-Path $r 'mismatch.log.tar.gz') -C $r 'wrongname.log' 2>$null
+Remove-Item (Join-Path $r 'wrongname.log') -Force -ErrorAction SilentlyContinue
+Remove-Item $stage -Recurse -Force -ErrorAction SilentlyContinue
+& $Script restore (Join-Path $r 'trav.log.tar.gz') | Out-Null
+$travRc = $LASTEXITCODE
+Check 'traversal refused' { $travRc -ne 0 }
+Check 'traversal no output' { -not (Test-Path (Join-Path $r 'trav.log')) }
+& $Script restore (Join-Path $r 'mismatch.log.tar.gz') | Out-Null
+$misRc = $LASTEXITCODE
+Check 'mismatch refused' { $misRc -ne 0 }
+Check 'mismatch no output' { -not (Test-Path (Join-Path $r 'mismatch.log')) }
+Remove-Item (Join-Path $r 'trav.log.tar.gz') -Force -ErrorAction SilentlyContinue
+Remove-Item (Join-Path $r 'mismatch.log.tar.gz') -Force -ErrorAction SilentlyContinue
+
+Write-Output '--- corrupt archive restore ---'
+$rnd = New-Object Random(99); $cb = New-Object byte[] 100
+for ($i = 0; $i -lt $cb.Length; $i++) { $cb[$i] = [byte]$rnd.Next(256) }
+[IO.File]::WriteAllBytes((Join-Path $r 'corrupt.log.tar.gz'), $cb)
+& $Script restore (Join-Path $r 'corrupt.log.tar.gz') | Out-Null
+$corRc = $LASTEXITCODE
+Check 'corrupt refused' { $corRc -ne 0 }
+Check 'corrupt no output' { -not (Test-Path (Join-Path $r 'corrupt.log')) }
+Remove-Item (Join-Path $r 'corrupt.log.tar.gz') -Force -ErrorAction SilentlyContinue
+
+Write-Output '--- space filename ---'
+BigFile (Join-Path $r 'space name.log') 20 22
+(Get-Item (Join-Path $r 'space name.log')).LastWriteTime = (Get-Date).AddMinutes(-5)
+& $Script clean | Out-Null
+Check 'space archived' { (-not (Test-Path (Join-Path $r 'space name.log'))) -and (Test-Path (Join-Path $r 'space name.log.tar.gz')) }
+
 Remove-Item $base -Recurse -Force -ErrorAction SilentlyContinue
 Remove-Item Env:\ZLOG_TEST_ROOT -ErrorAction SilentlyContinue
 if ($fail -eq 0) { Write-Output 'POWERSHELL TESTS ALL PASS' } else { Write-Output 'POWERSHELL TESTS FAILED'; exit 1 }

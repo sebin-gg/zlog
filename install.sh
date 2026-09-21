@@ -52,16 +52,37 @@ if [ ! -s "$TMP_DIR/scripts/zlog.sh" ] || [ ! -s "$TMP_DIR/scripts/zlog.ps1" ]; 
 fi
 
 for SKILL_DIR in "${SKILL_DIRS[@]}"; do
-  mkdir -p "$SKILL_DIR"
-  if [ -f "$SKILL_DIR/SKILL.md" ]; then
-    cp "$SKILL_DIR/SKILL.md" "$SKILL_DIR/SKILL.md.bak"
-  fi
+  # Atomic replacement: stage the complete skill, validate it, then
+  # rename into place so a failure can never leave a mixed installation.
+  STAGE="$SKILL_DIR.new.$$"
+  rm -rf "$STAGE"
   for f in $SKILL_FILES; do
-    mkdir -p "$SKILL_DIR/$(dirname "$f")"
-    cp "$TMP_DIR/$f" "$SKILL_DIR/$f"
+    mkdir -p "$STAGE/$(dirname "$f")"
+    cp "$TMP_DIR/$f" "$STAGE/$f"
   done
-  chmod +x "$SKILL_DIR/scripts/zlog.sh" 2>/dev/null || true
-  echo "✓ installed to $SKILL_DIR/ (SKILL.md + scripts/ + references/)"
+  chmod +x "$STAGE/scripts/zlog.sh" 2>/dev/null || true
+  if ! head -1 "$STAGE/SKILL.md" | grep -q "^---$"; then
+    echo "Error: staged skill is not valid (missing frontmatter), aborting install to $SKILL_DIR" >&2
+    rm -rf "$STAGE"
+    exit 1
+  fi
+  if [ -d "$SKILL_DIR" ]; then
+    BACKUP="$SKILL_DIR.bak.$(date +%Y%m%d%H%M%S)"
+    rm -rf "$BACKUP"
+    mv "$SKILL_DIR" "$BACKUP" || { rm -rf "$STAGE"; echo "Error: cannot back up $SKILL_DIR" >&2; exit 1; }
+    if mv "$STAGE" "$SKILL_DIR"; then
+      echo "✓ installed to $SKILL_DIR/ (previous skill backed up to $BACKUP/)"
+    else
+      mv "$BACKUP" "$SKILL_DIR" 2>/dev/null || true
+      rm -rf "$STAGE"
+      echo "Error: install to $SKILL_DIR failed, previous version restored" >&2
+      exit 1
+    fi
+  else
+    mkdir -p "$(dirname "$SKILL_DIR")"
+    mv "$STAGE" "$SKILL_DIR" || { rm -rf "$STAGE"; echo "Error: install to $SKILL_DIR failed" >&2; exit 1; }
+    echo "✓ installed to $SKILL_DIR/ (SKILL.md + scripts/ + references/)"
+  fi
 done
 rm -rf "$TMP_DIR" "$TMP_FILE"
 echo "Trigger in chat with: 'zlog', 'compress logs', 'clean up chat logs', 'pack logs', 'preview zlog', 'dry run', 'find new AI agents', or 'scan disk for hidden AI logs'."

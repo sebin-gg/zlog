@@ -1,5 +1,40 @@
 # Changelog
 
+## Unreleased (hardening: collision, TOCTOU, restore, deep-scan, installer, CI)
+
+- Compression no longer overwrites an existing archive: the destination
+  must be absent before publish (POSIX hardlink / no-clobber move,
+  .NET `File.Move` on PowerShell); otherwise `UNSAFE-SKIP` with the
+  source preserved. Covered by collision fixtures (existing
+  `.zst`/`.gz`/`.xz`/`.tar.gz`).
+- TOCTOU gap closed: the source's inode/size/mtime is captured before
+  compression and verified after (and once more after publish, before
+  deletion). A source that changed mid-run is preserved and reported
+  `FAILED`. Covered by a racy-compressor fixture.
+- TAR restore validates the member name: single-entry archives whose
+  member does not exactly equal the intended basename (traversal,
+  absolute, or wrong-name entries) are refused as `UNSAFE-SKIP`, and
+  extraction always goes to a temp dir first (both platforms).
+- POSIX deep scan narrowed from broad `*/AppData/*` to the approved
+  `*/AppData/Local/Ollama/*`.
+- Removed the duplicate `zlog_candidates()` definition (one shared
+  candidate engine; CI now enforces singularity).
+- Regression tests expanded: destination collision, empty protected
+  files, mid-run modification, malicious/path-traversal TAR, corrupt
+  archives, missing compressors, newline filenames, hardlinks,
+  permission failures, space-in-path (PowerShell).
+- CI runs PowerShell behavioral fixtures on `windows-latest` (was
+  `ubuntu-latest`); POSIX fixtures stay on `ubuntu-latest`.
+- `install.sh` is atomic: stages the complete skill, validates it, then
+  renames into place; the whole previous skill dir is backed up
+  (`*.bak.TIMESTAMP`) with rollback on failure.
+- README claims aligned with evidence: transcript protection described
+  as best-effort filtering; platform support states Linux + Windows 11
+  tested, macOS/WSL fallbacks untested.
+- Note: earlier entries below described the purge predicate and
+  transactional compression as complete before the collision/TOCTOU
+  gaps were closed; this entry documents the actual fix.
+
 ## Unreleased (v2.0.0: skill architecture — brain + scripts + references + tests)
 
 - `SKILL.md` rewritten as the decision brain (Purpose, Use When,

@@ -59,6 +59,11 @@ jobs:
               if not cond: ok = False
           check("find -L" not in sh, "scripts/zlog.sh never follows symlinks")
           check(sh.count("prune=(-name") + sh.count("PRUNE=(-name") == 1, "single canonical prune definition")
+          check(sh.count("zlog_candidates() {") == 1, "single candidate definition (no duplicate)")
+          check("mv -f \"$tmp\"" not in sh, "no clobbering rename in compress path (dest-absent required)")
+          check("Move-Item -Force" not in open("scripts/zlog.ps1").read(), "no clobbering move on Windows")
+          check('*/AppData/*"' not in sh and "*/AppData/*'" not in sh, "deep scan has no broad AppData path")
+          check("AppData/Local/Ollama" in sh, "deep scan keeps approved Ollama AppData path")
           check("77%" not in skill and "77%" not in readme, "no unmeasured % claims in docs")
           check("4-5x" not in skill and "4-5x" not in readme, "no ratio claims in docs")
           check("local/bin/zlog" not in skill and "local/bin/zlog" not in readme, "no stale CLI refs")
@@ -77,13 +82,18 @@ jobs:
             if ($errs.Count -gt 0) { $errs | ForEach-Object { Write-Error "$f : $($_.Message)" }; exit 1 }
             Write-Host "✓ $f parses cleanly"
           }
-  behavior:
-    name: Behavioral fixture tests
+  behavior-posix:
+    name: Behavioral fixture tests (POSIX)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4 pinned
       - name: POSIX destructive-behavior fixtures
         run: bash tests/test-posix.sh scripts/zlog.sh
+  behavior-windows:
+    name: Behavioral fixture tests (Windows)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4 pinned
       - name: PowerShell destructive-behavior fixtures
         shell: pwsh
         run: ./tests/test-powershell.ps1 -Script ./scripts/zlog.ps1

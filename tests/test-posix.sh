@@ -70,5 +70,111 @@ before=$(find "$HOME" | sort | md5sum)
 bash "$ZLOG_SH" deep-preview > /dev/null
 check "deep-preview changes nothing" "[ \"\$(find $HOME | sort | md5sum)\" = \"$before\" ]"
 
+echo "--- collision (existing dest → UNSAFE-SKIP, source preserved) ---"
+python3 -c "open('$ZLOG_TEST_ROOT/collide.log','w').write('compressible log line\n'*2000)"
+touch -d '5 minutes ago' "$ZLOG_TEST_ROOT/collide.log"
+echo "pre-existing-dest" > "$ZLOG_TEST_ROOT/collide.log.zst"
+echo "pre-existing-dest" > "$ZLOG_TEST_ROOT/collide.log.gz"
+echo "pre-existing-dest" > "$ZLOG_TEST_ROOT/collide.log.xz"
+cp "$ZLOG_TEST_ROOT/collide.log.zst" "$FX/collide.zst.orig"
+cp "$ZLOG_TEST_ROOT/collide.log.gz" "$FX/collide.gz.orig"
+cp "$ZLOG_TEST_ROOT/collide.log.xz" "$FX/collide.xz.orig"
+bash "$ZLOG_SH" clean > "$FX/clean2.txt"; cat "$FX/clean2.txt"
+check "collision source preserved" "[ -f $ZLOG_TEST_ROOT/collide.log ]"
+check "collision dest untouched" "cmp -s $ZLOG_TEST_ROOT/collide.log.zst $FX/collide.zst.orig && cmp -s $ZLOG_TEST_ROOT/collide.log.gz $FX/collide.gz.orig && cmp -s $ZLOG_TEST_ROOT/collide.log.xz $FX/collide.xz.orig"
+check "collision reported" "grep -q 'UNSAFE-SKIP' \"\$FX/clean2.txt\""
+check "collision no tmp leftovers" "[ -z \"\$(ls $ZLOG_TEST_ROOT/ | grep 'tmp\\.' || true)\" ]"
+rm -f "$ZLOG_TEST_ROOT/collide.log" "$ZLOG_TEST_ROOT/collide.log.zst" \
+  "$ZLOG_TEST_ROOT/collide.log.gz" "$ZLOG_TEST_ROOT/collide.log.xz"
+
+echo "--- TOCTOU (source changed mid-compression → preserved) ---"
+if command -v zstd >/dev/null 2>&1; then
+  REAL_ZSTD="$(command -v zstd)"
+  mkdir -p "$FX/fakebin"
+  printf '#!/bin/bash\nfor a in "$@"; do case "$a" in *.log) [ -f "$a" ] && echo RACE >> "$a" ;; esac; done\nexec "%s" "$@"\n' "$REAL_ZSTD" > "$FX/fakebin/zstd"
+  chmod +x "$FX/fakebin/zstd"
+  python3 -c "open('$ZLOG_TEST_ROOT/race.log','w').write('compressible log line\n'*2000)"
+  touch -d '5 minutes ago' "$ZLOG_TEST_ROOT/race.log"
+  PATH="$FX/fakebin:$PATH" bash "$ZLOG_SH" clean > "$FX/clean3.txt"; cat "$FX/clean3.txt"
+  check "race source preserved" "[ -f $ZLOG_TEST_ROOT/race.log ]"
+  check "race no archive" "[ ! -e $ZLOG_TEST_ROOT/race.log.zst ] && [ ! -e $ZLOG_TEST_ROOT/race.log.gz ] && [ ! -e $ZLOG_TEST_ROOT/race.log.xz ]"
+  check "race reported" "grep -q 'source changed' \"\$FX/clean3.txt\""
+  rm -f "$ZLOG_TEST_ROOT/race.log" "$ZLOG_TEST_ROOT/race.log".*
+  rm -rf "$FX/fakebin"
+else
+  echo "SKIP: race test (no zstd)"
+fi
+
+echo "--- tar traversal / mismatch restore refused ---"
+python3 - "$ZLOG_TEST_ROOT" <<'EOF'
+import tarfile, sys
+root = sys.argv[1]
+with tarfile.open(root + '/trav.log.tar.gz', 'w:gz') as t:
+    import io
+    ti = tarfile.TarInfo('../escape.log'); data = b'evil'
+    ti.size = len(data); t.addfile(ti, io.BytesIO(data))
+with tarfile.open(root + '/mismatch.log.tar.gz', 'w:gz') as t:
+    import io
+    ti = tarfile.TarInfo('wrongname.log'); data = b'evil'
+    ti.size = len(data); t.addfile(ti, io.BytesIO(data))
+EOF
+check "traversal refused" "! bash \"$ZLOG_SH\" restore \"$ZLOG_TEST_ROOT/trav.log.tar.gz\""
+check "traversal no escape" "[ ! -e $ZLOG_TEST_ROOT/escape.log ] && [ ! -e $FX/escape.log ] && [ ! -e $ZLOG_TEST_ROOT/../escape.log ]"
+check "traversal no output" "[ ! -e $ZLOG_TEST_ROOT/trav.log ]"
+check "mismatch refused" "! bash \"$ZLOG_SH\" restore \"$ZLOG_TEST_ROOT/mismatch.log.tar.gz\""
+check "mismatch no output" "[ ! -e $ZLOG_TEST_ROOT/mismatch.log ]"
+check "malicious archives kept" "[ -f $ZLOG_TEST_ROOT/trav.log.tar.gz ] && [ -f $ZLOG_TEST_ROOT/mismatch.log.tar.gz ]"
+rm -f "$ZLOG_TEST_ROOT/trav.log.tar.gz" "$ZLOG_TEST_ROOT/mismatch.log.tar.gz"
+
+echo "--- corrupt archive restore ---"
+head -c 100 /dev/urandom > "$ZLOG_TEST_ROOT/corrupt.log.zst"
+check "corrupt refused" "! bash \"$ZLOG_SH\" restore \"$ZLOG_TEST_ROOT/corrupt.log.zst\""
+check "corrupt no output" "[ ! -e $ZLOG_TEST_ROOT/corrupt.log ]"
+check "corrupt archive kept" "[ -f $ZLOG_TEST_ROOT/corrupt.log.zst ]"
+rm -f "$ZLOG_TEST_ROOT/corrupt.log.zst"
+
+echo "--- missing compressors (all fail → source preserved) ---"
+mkdir -p "$FX/nocomp"
+for t in zstd xz gzip; do printf '#!/bin/bash\nexit 1\n' > "$FX/nocomp/$t"; chmod +x "$FX/nocomp/$t"; done
+python3 -c "open('$ZLOG_TEST_ROOT/nocomp.log','w').write('compressible log line\n'*2000)"
+touch -d '5 minutes ago' "$ZLOG_TEST_ROOT/nocomp.log"
+PATH="$FX/nocomp:$PATH" bash "$ZLOG_SH" clean > "$FX/clean4.txt"; cat "$FX/clean4.txt"
+check "nocomp source preserved" "[ -f $ZLOG_TEST_ROOT/nocomp.log ]"
+check "nocomp no archive" "[ ! -e $ZLOG_TEST_ROOT/nocomp.log.zst ] && [ ! -e $ZLOG_TEST_ROOT/nocomp.log.gz ] && [ ! -e $ZLOG_TEST_ROOT/nocomp.log.xz ]"
+rm -f "$ZLOG_TEST_ROOT/nocomp.log"; rm -rf "$FX/nocomp"
+
+echo "--- newline filename ---"
+NLFILE="$ZLOG_TEST_ROOT/nl
+name.log"
+python3 -c "open('$ZLOG_TEST_ROOT/nl\nname.log','w').write('compressible log line\n'*2000)"
+touch -d '5 minutes ago' "$NLFILE"
+bash "$ZLOG_SH" clean > "$FX/clean5.txt"; cat "$FX/clean5.txt"
+check "newline archived" "[ ! -e \"\$NLFILE\" ] && (ls \"$ZLOG_TEST_ROOT\" | grep -q 'nl')"
+check "newline no tmp leftovers" "[ -z \"\$(ls $ZLOG_TEST_ROOT/ | grep 'tmp\\.' || true)\" ]"
+
+echo "--- hardlinks compress independently ---"
+python3 -c "open('$ZLOG_TEST_ROOT/hard1.log','w').write('compressible log line\n'*2000)"
+ln "$ZLOG_TEST_ROOT/hard1.log" "$ZLOG_TEST_ROOT/hard2.log"
+touch -d '5 minutes ago' "$ZLOG_TEST_ROOT/hard1.log" "$ZLOG_TEST_ROOT/hard2.log"
+bash "$ZLOG_SH" clean > "$FX/clean6.txt"; cat "$FX/clean6.txt"
+check "hardlinks both handled" "[ ! -e $ZLOG_TEST_ROOT/hard1.log ] && [ ! -e $ZLOG_TEST_ROOT/hard2.log ]"
+check "hardlinks archives exist" "ls $ZLOG_TEST_ROOT/hard1.log.* >/dev/null && ls $ZLOG_TEST_ROOT/hard2.log.* >/dev/null"
+
+echo "--- permission failure (unreadable source → preserved) ---"
+python3 -c "open('$ZLOG_TEST_ROOT/noperm.log','w').write('compressible log line\n'*2000)"
+touch -d '5 minutes ago' "$ZLOG_TEST_ROOT/noperm.log"
+chmod 000 "$ZLOG_TEST_ROOT/noperm.log"
+if cat "$ZLOG_TEST_ROOT/noperm.log" >/dev/null 2>&1 && [ "$(id -u)" -eq 0 ]; then
+  echo "SKIP: permission test (running as root)"
+else
+  bash "$ZLOG_SH" clean > "$FX/clean7.txt"; cat "$FX/clean7.txt"
+  if cat "$ZLOG_TEST_ROOT/noperm.log" >/dev/null 2>&1; then
+    echo "SKIP: permission test (chmod not enforced here)"
+  else
+    check "noperm preserved" "[ -f $ZLOG_TEST_ROOT/noperm.log ]"
+  fi
+fi
+chmod 644 "$ZLOG_TEST_ROOT/noperm.log" 2>/dev/null; rm -f "$ZLOG_TEST_ROOT/noperm.log"
+
 if [ "$fail" -eq 0 ]; then echo "POSIX TESTS ALL PASS"; else echo "POSIX TESTS FAILED"; fi
 exit $fail

@@ -61,7 +61,13 @@ Full rationale: `references/safety.md`. Non-negotiable invariants:
 - Never descend into Class C junk locations.
 - Never compress a locked or fresh file; never clean caches unprompted.
 - Never delete a source unless its archive passed integrity test AND is
-  smaller than the source (transactional: temp → test → rename → delete).
+  smaller than the source AND the destination was absent AND the source
+  is byte-identical (inode/size/mtime) to when it was scanned
+  (transactional: temp → test → size check → dest-absent check →
+  source-unchanged check → publish-without-overwrite → delete).
+- Restore never overwrites: unknown formats refused, existing
+  destinations kept, `.tar.gz` members must exactly match the intended
+  basename (extracted to a temp dir first).
 - Unknown (Class D) files and directories are ignored by default.
 
 ## Scan Scope
@@ -105,9 +111,10 @@ Known-location deep walk (not new-agent discovery). Always
 ## Failure Handling
 
 Per-file status, never silent: `COMPRESSED`, `SKIPPED` (locked/fresh),
-`FAILED` (exit-code/integrity failure, source preserved),
-`NOT_BENEFICIAL` (archive not smaller, source preserved),
-`UNSAFE-SKIP` (unknown format, destination exists, multi-entry tar).
+`FAILED` (exit-code/integrity failure or source changed mid-run, source
+preserved), `NOT_BENEFICIAL` (archive not smaller, source preserved),
+`UNSAFE-SKIP` (unknown format, destination exists, multi-entry or
+member-mismatch tar).
 Surface failures to the user with the reason and "original preserved".
 
 ## Reporting

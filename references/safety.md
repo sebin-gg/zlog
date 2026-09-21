@@ -14,9 +14,17 @@ candidate
   → exit status ok? (no → drop temp, FAILED)
   → integrity test ok? (zstd -t / xz -t / gzip -t, no → drop temp, FAILED)
   → smaller than source? (no → drop temp, NOT_BENEFICIAL)
-  → atomic rename to final archive name
+  → destination archive already exists? (yes → drop temp, UNSAFE-SKIP)
+  → source inode/size/mtime unchanged since scan? (no → drop temp, FAILED)
+  → publish without overwriting (hardlink/.NET move, fails if raced)
+  → source still unchanged? (no → remove just-published archive, FAILED)
   → delete source
 ```
+
+Restore validates the same way: unknown formats refused, existing
+destinations never overwritten, and `.tar.gz` members must exactly match
+the intended basename (extracted to a temp dir first, never directly
+into the output directory).
 
 ## Data classes
 

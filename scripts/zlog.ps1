@@ -71,20 +71,43 @@ function DoClean() {
   }
   zlogCandidates 10 $false | ForEach-Object {
     $cands++
-    $size = $_.Length
+    $preLen = $_.Length
+    $preTime = $_.LastWriteTimeUtc
     if (-not (zlogFree $_.FullName)) { $locked++; $skipped++; return }
     $tmp = "$($_.FullName).$PID.tmp.tar.gz"
     $out = "$($_.FullName).tar.gz"
     & $tarBin -czf "$tmp" -C "$($_.DirectoryName)" "$($_.Name)" 2>$null
-    if ($LASTEXITCODE -eq 0 -and (Test-Path $tmp) -and ((Get-Item $tmp).Length -gt 0) -and ((Get-Item $tmp).Length -lt $size)) {
-      Move-Item -Force $tmp $out
-      $new = (Get-Item $out).Length
-      $raw += $size; $saved += ($size - $new); $comp++
-      Remove-Item $_.FullName -Force
-    } else {
+    if ($LASTEXITCODE -ne 0 -or -not (Test-Path $tmp)) {
       if (Test-Path $tmp) { Remove-Item $tmp -Force -ErrorAction SilentlyContinue }
-      if ($LASTEXITCODE -ne 0) { $failed++ } else { $notbene++; $skipped++ }
+      Write-Output "[zlog] FAILED (compressor error): $($_.FullName) (original preserved)"; $failed++; return
     }
+    $tmpLen = (Get-Item $tmp).Length
+    if ($tmpLen -le 0 -or $tmpLen -ge $preLen) {
+      Remove-Item $tmp -Force -ErrorAction SilentlyContinue
+      $notbene++; $skipped++; return
+    }
+    if (Test-Path $out) {
+      Remove-Item $tmp -Force -ErrorAction SilentlyContinue
+      Write-Output "[zlog] UNSAFE-SKIP (destination exists): $out (source preserved)"; $skipped++; return
+    }
+    $cur = Get-Item $_.FullName -ErrorAction SilentlyContinue
+    if (-not $cur -or $cur.Length -ne $preLen -or $cur.LastWriteTimeUtc -ne $preTime) {
+      Remove-Item $tmp -Force -ErrorAction SilentlyContinue
+      Write-Output "[zlog] FAILED (source changed during compression): $($_.FullName) (original preserved)"; $failed++; return
+    }
+    try { [System.IO.File]::Move($tmp, $out) }
+    catch {
+      if (Test-Path $tmp) { Remove-Item $tmp -Force -ErrorAction SilentlyContinue }
+      Write-Output "[zlog] UNSAFE-SKIP (destination exists): $out (source preserved)"; $skipped++; return
+    }
+    $cur2 = Get-Item $_.FullName -ErrorAction SilentlyContinue
+    if (-not $cur2 -or $cur2.Length -ne $preLen -or $cur2.LastWriteTimeUtc -ne $preTime) {
+      Remove-Item $out -Force -ErrorAction SilentlyContinue
+      Write-Output "[zlog] FAILED (source changed during compression): $($_.FullName) (original preserved)"; $failed++; return
+    }
+    $new = (Get-Item $out).Length
+    $raw += $preLen; $saved += ($preLen - $new); $comp++
+    Remove-Item $_.FullName -Force
   }
   zlogReport 'clean' $roots $cands $comp $raw $saved $purged $skipped $failed $notbene $locked
 }
@@ -112,7 +135,19 @@ function DoRestore($paths) {
     $rc = 1
     if ($kind -eq 'tar') {
       $entries = @(& $tarBin -tzf $a 2>$null)
-      if (($LASTEXITCODE -eq 0) -and ($entries.Count -eq 1)) { & $tarBin -xzf $a -C (Split-Path $out); $rc = $LASTEXITCODE }
+      $base = Split-Path $out -Leaf
+      if (($LASTEXITCODE -eq 0) -and ($entries.Count -eq 1) -and ($entries[0] -eq $base)) {
+        $tmpd = "$out.$PID.restore.dir"
+        $tmpf = Join-Path $tmpd $base
+        New-Item -ItemType Directory -Path $tmpd -Force | Out-Null
+        & $tarBin -xzf $a -C $tmpd 2>$null
+        if (($LASTEXITCODE -eq 0) -and (Test-Path $tmpf -PathType Leaf)) {
+          try { [System.IO.File]::Move($tmpf, $out); $rc = 0 } catch { $rc = 1 }
+        }
+        Remove-Item $tmpd -Recurse -Force -ErrorAction SilentlyContinue
+        if ($rc -ne 0) { Write-Output "[zlog] UNSAFE-SKIP (member mismatch or multi-entry): $a"; $fail++; continue }
+      }
+      else { Write-Output "[zlog] UNSAFE-SKIP (member mismatch or multi-entry): $a"; $fail++; continue }
     }
     elseif ($kind -eq 'gz' -and (Get-Command gzip -ErrorAction SilentlyContinue)) { gzip -d -c $a > $out 2>$null; $rc = $LASTEXITCODE }
     elseif ($kind -eq 'zst' -and (Get-Command zstd -ErrorAction SilentlyContinue)) { zstd -d -q $a -o $out 2>$null; $rc = $LASTEXITCODE }
