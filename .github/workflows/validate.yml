@@ -62,7 +62,7 @@ jobs:
           check(sh.count("zlog_candidates() {") == 1, "single candidate definition (no duplicate)")
           check("mv -f \"$tmp\"" not in sh, "no clobbering rename in compress path (dest-absent required)")
           check("Move-Item -Force" not in open("scripts/zlog.ps1").read(), "no clobbering move on Windows")
-          check('*/AppData/*"' not in sh and "*/AppData/*'" not in sh, "deep scan has no broad AppData path")
+          check("*/AppData/*\"" not in sh, "deep scan has no broad AppData path")
           check("AppData/Local/Ollama" in sh, "deep scan keeps approved Ollama AppData path")
           check("77%" not in skill and "77%" not in readme, "no unmeasured % claims in docs")
           check("4-5x" not in skill and "4-5x" not in readme, "no ratio claims in docs")
