@@ -92,11 +92,40 @@ Check 'corrupt refused' { $corRc -ne 0 }
 Check 'corrupt no output' { -not (Test-Path (Join-Path $r 'corrupt.log')) }
 Remove-Item (Join-Path $r 'corrupt.log.tar.gz') -Force -ErrorAction SilentlyContinue
 
+Write-Output '--- corrupt stream restore leaves no partial output ---'
+$rnd2 = New-Object Random(100); $cb2 = New-Object byte[] 100
+for ($i = 0; $i -lt $cb2.Length; $i++) { $cb2[$i] = [byte]$rnd2.Next(256) }
+[IO.File]::WriteAllBytes((Join-Path $r 'corrupt2.log.gz'), $cb2)
+& $Script restore (Join-Path $r 'corrupt2.log.gz') | Out-Null
+$cor2Rc = $LASTEXITCODE
+Check 'corrupt gz refused' { $cor2Rc -ne 0 }
+Check 'corrupt gz no output' { -not (Test-Path (Join-Path $r 'corrupt2.log')) }
+Check 'corrupt gz no tmp leftovers' { @(Get-ChildItem $r -Filter '*.tmp.restore*').Count -eq 0 }
+Check 'corrupt gz archive kept' { Test-Path (Join-Path $r 'corrupt2.log.gz') }
+Remove-Item (Join-Path $r 'corrupt2.log.gz') -Force -ErrorAction SilentlyContinue
+
 Write-Output '--- space filename ---'
 BigFile (Join-Path $r 'space name.log') 20 22
 (Get-Item (Join-Path $r 'space name.log')).LastWriteTime = (Get-Date).AddMinutes(-5)
 & $Script clean | Out-Null
 Check 'space archived' { (-not (Test-Path (Join-Path $r 'space name.log'))) -and (Test-Path (Join-Path $r 'space name.log.tar.gz')) }
+
+Write-Output '--- deep alias (same roots as standard, explicit) ---'
+BigFile (Join-Path $r 'deepfix.log') 20 23
+(Get-Item (Join-Path $r 'deepfix.log')).LastWriteTime = (Get-Date).AddMinutes(-5)
+$dp = @(& $Script deep-preview)
+$dp | ForEach-Object { Write-Output $_ }
+Check 'deep-preview lists candidate' { $dp -match 'deepfix\.log' }
+Check 'deep-preview says alias' { $dp -match 'same roots as preview' }
+$beforeDeep = @(Get-ChildItem $r -Recurse | ForEach-Object { $_.FullName }) -join "`n"
+& $Script deep-preview | Out-Null
+$afterDeep = @(Get-ChildItem $r -Recurse | ForEach-Object { $_.FullName }) -join "`n"
+Check 'deep-preview changes nothing' { $afterDeep -eq $beforeDeep }
+$d = @(& $Script deep)
+$d | ForEach-Object { Write-Output $_ }
+Check 'deep says alias' { $d -match 'same operation as clean' }
+Check 'deep archived' { (-not (Test-Path (Join-Path $r 'deepfix.log'))) -and (Test-Path (Join-Path $r 'deepfix.log.tar.gz')) }
+Check 'deep report line present' { $d -match '^\[zlog\] mode=clean' }
 
 Remove-Item $base -Recurse -Force -ErrorAction SilentlyContinue
 Remove-Item Env:\ZLOG_TEST_ROOT -ErrorAction SilentlyContinue

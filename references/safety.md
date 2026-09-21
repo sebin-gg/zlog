@@ -15,7 +15,8 @@ candidate
   → integrity test ok? (zstd -t / xz -t / gzip -t, no → drop temp, FAILED)
   → smaller than source? (no → drop temp, NOT_BENEFICIAL)
   → destination archive already exists? (yes → drop temp, UNSAFE-SKIP)
-  → source inode/size/mtime unchanged since scan? (no → drop temp, FAILED)
+  → source identity unchanged since scan? (POSIX: inode/size/mtime;
+     Windows: size/timestamps/partial-content hash; no → drop temp, FAILED)
   → publish without overwriting (hardlink/.NET move, fails if raced)
   → source still unchanged? (no → remove just-published archive, FAILED)
   → delete source
@@ -24,7 +25,9 @@ candidate
 Restore validates the same way: unknown formats refused, existing
 destinations never overwritten, and `.tar.gz` members must exactly match
 the intended basename (extracted to a temp dir first, never directly
-into the output directory).
+into the output directory). Stream restores (`.gz`/`.zst`/`.xz`) decode
+to a temp file and move it into place, so a failed decompression never
+leaves a partial file at the destination.
 
 ## Data classes
 
@@ -56,5 +59,8 @@ the symlink-escape fixture in `tests/`.
   but duplicated output, reported normally.
 - `tar` on Windows archives one file per `.tar.gz`; restore refuses
   multi-entry archives.
+- On Windows, `deep-preview`/`deep` are the same operation as
+  `preview`/`clean`: the standard roots already recurse fully, so there
+  is no separate wider scan (the scripts announce this).
 - Deep scan bounds depth (`-maxdepth 12`), not total work; it walks known
   agent locations under `$HOME`, never the whole disk blindly.

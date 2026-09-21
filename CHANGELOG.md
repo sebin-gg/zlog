@@ -35,6 +35,22 @@
   transactional compression as complete before the collision/TOCTOU
   gaps were closed; this entry documents the actual fix.
 
+## Unreleased (review follow-up: deep alias, stronger identity, restore)
+
+- Windows `deep-preview`/`deep` are now an explicit documented alias:
+  the standard roots already recurse fully, so there is no separate
+  wider scan; the scripts announce this in their output, and `SKILL.md`
+  plus `references/safety.md` record it. Covered by deep-alias
+  fixtures (read-only preview, end-to-end deep clean).
+- PowerShell source identity strengthened from size+mtime to
+  size+timestamps+partial-content hash (first/last 64KB SHA-256),
+  closer to the POSIX inode/size/mtime check.
+- Non-TAR restores (`.gz`/`.zst`/`.xz`) decode to a temp file and move
+  it into place on both platforms, so a failed decompression never
+  leaves a partial file at the destination. Covered by corrupt-`.gz`
+  fixtures asserting no output and no temp leftovers.
+- POSIX `deep` end-to-end fixture added (fake HOME).
+
 ## Unreleased (v2.0.0: skill architecture — brain + scripts + references + tests)
 
 - `SKILL.md` rewritten as the decision brain (Purpose, Use When,

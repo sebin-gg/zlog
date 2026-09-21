@@ -107,6 +107,9 @@ compression — never quote a ratio; run `clean` for measured savings.
 
 Known-location deep walk (not new-agent discovery). Always
 `deep-preview` before `deep`. Pruned-dir count is reported.
+On Windows, standard roots already recurse fully, so `deep-preview`
+and `deep` are explicitly the same operation as `preview` and `clean`
+(the scripts say so in their output) — not a separate wider scan.
 
 ## Failure Handling
 

@@ -15,6 +15,34 @@ function zlogFmt($b) { if ($b -ge 1073741824) { "{0:N1}G" -f ($b/1073741824) } e
 # 5.1-safe lock probe (inline try/catch is a statement and illegal inside Where-Object on 5.1)
 function zlogFree($p) { try { $s = [System.IO.File]::Open($p, 'Open', 'ReadWrite', 'None'); $s.Close(); $true } catch { $false } }
 
+# Source identity for TOCTOU checks: length + timestamps + partial content
+# hash (first/last 64KB). Stronger than size+mtime alone: a same-size
+# in-place rewrite with a restored timestamp cannot pass unnoticed unless
+# the content is also byte-identical. Returns $null when unreadable.
+function zlogIdent($p) {
+  try {
+    $it = Get-Item $p -ErrorAction Stop
+    $len = $it.Length
+    $pre = "$len|$($it.LastWriteTimeUtc.Ticks)|$($it.CreationTimeUtc.Ticks)"
+    $fs = [System.IO.File]::Open($p, 'Open', 'Read', 'ReadWrite')
+    try {
+      $h = [System.Security.Cryptography.SHA256]::Create()
+      $buf = New-Object byte[] 65536
+      $n1 = $fs.Read($buf, 0, 65536)
+      if ($n1 -gt 0) { [void]$h.TransformBlock($buf, 0, $n1, $buf, 0) }
+      if ($len -gt 65536) {
+        [void]$fs.Seek(-65536, [System.IO.SeekOrigin]::End)
+        $n2 = $fs.Read($buf, 0, 65536)
+        if ($n2 -gt 0) { [void]$h.TransformBlock($buf, 0, $n2, $buf, 0) }
+      }
+      [void]$h.TransformFinalBlock($buf, 0, 0)
+      $hash = [BitConverter]::ToString($h.Hash).Replace('-', '')
+      $h.Dispose()
+    } finally { $fs.Close() }
+    return "$pre|$hash"
+  } catch { return $null }
+}
+
 function zlogCutoffMinutes() { if ($OlderThanDays -gt 0) { return ($OlderThanDays * 1440 + 1) } return 1 }
 
 function zlogIsProtected($name) {
@@ -72,7 +100,8 @@ function DoClean() {
   zlogCandidates 10 $false | ForEach-Object {
     $cands++
     $preLen = $_.Length
-    $preTime = $_.LastWriteTimeUtc
+    $preId = zlogIdent $_.FullName
+    if (-not $preId) { Write-Output "[zlog] FAILED (source unreadable): $($_.FullName) (original preserved)"; $failed++; return }
     if (-not (zlogFree $_.FullName)) { $locked++; $skipped++; return }
     $tmp = "$($_.FullName).$PID.tmp.tar.gz"
     $out = "$($_.FullName).tar.gz"
@@ -90,8 +119,8 @@ function DoClean() {
       Remove-Item $tmp -Force -ErrorAction SilentlyContinue
       Write-Output "[zlog] UNSAFE-SKIP (destination exists): $out (source preserved)"; $skipped++; return
     }
-    $cur = Get-Item $_.FullName -ErrorAction SilentlyContinue
-    if (-not $cur -or $cur.Length -ne $preLen -or $cur.LastWriteTimeUtc -ne $preTime) {
+    $cur = zlogIdent $_.FullName
+    if (-not $cur -or $cur -ne $preId) {
       Remove-Item $tmp -Force -ErrorAction SilentlyContinue
       Write-Output "[zlog] FAILED (source changed during compression): $($_.FullName) (original preserved)"; $failed++; return
     }
@@ -100,8 +129,8 @@ function DoClean() {
       if (Test-Path $tmp) { Remove-Item $tmp -Force -ErrorAction SilentlyContinue }
       Write-Output "[zlog] UNSAFE-SKIP (destination exists): $out (source preserved)"; $skipped++; return
     }
-    $cur2 = Get-Item $_.FullName -ErrorAction SilentlyContinue
-    if (-not $cur2 -or $cur2.Length -ne $preLen -or $cur2.LastWriteTimeUtc -ne $preTime) {
+    $cur2 = zlogIdent $_.FullName
+    if (-not $cur2 -or $cur2 -ne $preId) {
       Remove-Item $out -Force -ErrorAction SilentlyContinue
       Write-Output "[zlog] FAILED (source changed during compression): $($_.FullName) (original preserved)"; $failed++; return
     }
@@ -114,11 +143,12 @@ function DoClean() {
 
 function DoDeepPreview() {
   Write-Output '[zlog] deep-preview is read-only; known agent locations only (no unknown-agent discovery)'
+  Write-Output '[zlog] Windows note: standard roots already recurse fully, so deep-preview covers the same roots as preview'
   DoPreview
 }
 
 function DoDeep() {
-  Write-Output '[zlog] deep = clean over known roots (same engine, same predicate)'
+  Write-Output '[zlog] Windows note: standard roots already recurse fully, so deep is the same operation as clean (same engine, same predicate)'
   DoClean
 }
 
@@ -149,9 +179,20 @@ function DoRestore($paths) {
       }
       else { Write-Output "[zlog] UNSAFE-SKIP (member mismatch or multi-entry): $a"; $fail++; continue }
     }
-    elseif ($kind -eq 'gz' -and (Get-Command gzip -ErrorAction SilentlyContinue)) { gzip -d -c $a > $out 2>$null; $rc = $LASTEXITCODE }
-    elseif ($kind -eq 'zst' -and (Get-Command zstd -ErrorAction SilentlyContinue)) { zstd -d -q $a -o $out 2>$null; $rc = $LASTEXITCODE }
-    elseif ($kind -eq 'xz' -and (Get-Command xz -ErrorAction SilentlyContinue)) { xz -d -c $a > $out 2>$null; $rc = $LASTEXITCODE }
+    else {
+      # Stream formats decode to a temp file first: a decompression
+      # failure must never leave a partial file at the destination.
+      $tmpOut = "$out.$PID.tmp.restore"
+      Remove-Item $tmpOut -Force -ErrorAction SilentlyContinue
+      $streamOk = $false
+      if ($kind -eq 'gz' -and (Get-Command gzip -ErrorAction SilentlyContinue)) { gzip -d -c $a > $tmpOut 2>$null; $streamOk = ($LASTEXITCODE -eq 0) }
+      elseif ($kind -eq 'zst' -and (Get-Command zstd -ErrorAction SilentlyContinue)) { zstd -d -q $a -o $tmpOut 2>$null; $streamOk = ($LASTEXITCODE -eq 0) }
+      elseif ($kind -eq 'xz' -and (Get-Command xz -ErrorAction SilentlyContinue)) { xz -d -c $a > $tmpOut 2>$null; $streamOk = ($LASTEXITCODE -eq 0) }
+      if ($streamOk -and (Test-Path $tmpOut) -and ((Get-Item $tmpOut).Length -gt 0)) {
+        try { [System.IO.File]::Move($tmpOut, $out); $rc = 0 } catch { $rc = 1 }
+      }
+      if (Test-Path $tmpOut) { Remove-Item $tmpOut -Force -ErrorAction SilentlyContinue }
+    }
     if (($rc -eq 0) -and (Test-Path $out) -and ((Get-Item $out).Length -gt 0)) { Write-Output "[zlog] RESTORED: $out (archive preserved)"; $ok++ }
     else { if (Test-Path $out) { Remove-Item $out -Force -ErrorAction SilentlyContinue }; Write-Output "[zlog] FAILED: $a (nothing written; tool missing or archive invalid)"; $fail++ }
   }

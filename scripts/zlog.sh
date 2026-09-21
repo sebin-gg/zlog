@@ -293,9 +293,17 @@ do_restore() {
         fi
         rm -rf "$tmpd" 2>/dev/null
         ;;
-      *.zst) command -v zstd >/dev/null 2>&1 && zstd -d -q "$a" -o "$out" 2>/dev/null && rc=0 ;;
-      *.gz) gzip -d -c "$a" > "$out" 2>/dev/null && rc=0 ;;
-      *.xz) command -v xz >/dev/null 2>&1 && xz -d -c "$a" > "$out" 2>/dev/null && rc=0 ;;
+      # Stream formats decode to a temp file first: a decompression
+      # failure must never leave a partial file at the destination.
+      *.zst) tmp="$out.$$.tmp.restore"; rm -f "$tmp" 2>/dev/null
+        if command -v zstd >/dev/null 2>&1 && zstd -d -q "$a" -o "$tmp" 2>/dev/null \
+          && [ -s "$tmp" ] && mv "$tmp" "$out" 2>/dev/null; then rc=0; else rc=1; rm -f "$tmp" 2>/dev/null; fi ;;
+      *.gz) tmp="$out.$$.tmp.restore"; rm -f "$tmp" 2>/dev/null
+        if gzip -d -c "$a" > "$tmp" 2>/dev/null \
+          && [ -s "$tmp" ] && mv "$tmp" "$out" 2>/dev/null; then rc=0; else rc=1; rm -f "$tmp" 2>/dev/null; fi ;;
+      *.xz) tmp="$out.$$.tmp.restore"; rm -f "$tmp" 2>/dev/null
+        if command -v xz >/dev/null 2>&1 && xz -d -c "$a" > "$tmp" 2>/dev/null \
+          && [ -s "$tmp" ] && mv "$tmp" "$out" 2>/dev/null; then rc=0; else rc=1; rm -f "$tmp" 2>/dev/null; fi ;;
     esac
     if [ "$rc" -eq 0 ] && [ -s "$out" ]; then echo "[zlog] RESTORED: $out (archive preserved)"; ok=$((ok + 1)); else rm -f "$out" 2>/dev/null; echo "[zlog] FAILED: $a (nothing written)"; fail=$((fail + 1)); fi
   done

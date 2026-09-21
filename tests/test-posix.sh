@@ -133,6 +133,26 @@ check "corrupt no output" "[ ! -e $ZLOG_TEST_ROOT/corrupt.log ]"
 check "corrupt archive kept" "[ -f $ZLOG_TEST_ROOT/corrupt.log.zst ]"
 rm -f "$ZLOG_TEST_ROOT/corrupt.log.zst"
 
+echo "--- corrupt stream restore leaves no partial output ---"
+head -c 100 /dev/urandom > "$ZLOG_TEST_ROOT/corrupt2.log.gz"
+check "corrupt gz refused" "! bash \"$ZLOG_SH\" restore \"$ZLOG_TEST_ROOT/corrupt2.log.gz\""
+check "corrupt gz no output" "[ ! -e $ZLOG_TEST_ROOT/corrupt2.log ]"
+check "corrupt gz no tmp leftovers" "[ -z \"\$(ls $ZLOG_TEST_ROOT/ | grep 'tmp\\.restore' || true)\" ]"
+check "corrupt gz archive kept" "[ -f $ZLOG_TEST_ROOT/corrupt2.log.gz ]"
+rm -f "$ZLOG_TEST_ROOT/corrupt2.log.gz"
+
+echo "--- deep scan end-to-end (fake HOME) ---"
+python3 -c "open('$ZLOG_TEST_ROOT/deepfix.log','w').write('compressible log line\n'*2000)"
+touch -d '5 minutes ago' "$ZLOG_TEST_ROOT/deepfix.log"
+bash "$ZLOG_SH" deep-preview > "$FX/deepprev.txt"
+check "deep-preview lists candidate" "grep -q deepfix.log \"\$FX/deepprev.txt\""
+before=$(find "$HOME" | sort | md5sum)
+bash "$ZLOG_SH" deep-preview > /dev/null
+check "deep-preview still read-only" "[ \"\$(find $HOME | sort | md5sum)\" = \"$before\" ]"
+bash "$ZLOG_SH" deep > "$FX/deep.txt"; cat "$FX/deep.txt"
+check "deep archived" "[ ! -f $ZLOG_TEST_ROOT/deepfix.log ] && ls $ZLOG_TEST_ROOT/deepfix.log.* >/dev/null"
+check "deep report line present" "grep -q '^\\[zlog\\] mode=deep' \"\$FX/deep.txt\""
+
 echo "--- missing compressors (all fail → source preserved) ---"
 mkdir -p "$FX/nocomp"
 for t in zstd xz gzip; do printf '#!/bin/bash\nexit 1\n' > "$FX/nocomp/$t"; chmod +x "$FX/nocomp/$t"; done
