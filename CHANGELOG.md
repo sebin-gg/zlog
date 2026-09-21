@@ -90,6 +90,21 @@
   `PASS: race source preserved` and fail otherwise (ubuntu provides
   `zstd`; `windows-latest` provides function shadowing).
 
+## Unreleased (review follow-up 5: installer tests, metadata, edges)
+
+- `SKILL.md` `last_verified` touched to 2026-09-21.
+- `install.sh` accepts a `ZLOG_REPO_RAW` override (default unchanged)
+  so integration tests can install from a local `file://` repo.
+- New `tests/test-install.sh` (runs in CI): fresh install completeness,
+  upgrade backs up the whole previous skill dir, invalid skill aborts
+  with the live install untouched, `mv` failure aborts with no
+  half-installed stage, and promote failure rolls the previous skill
+  back. macOS/WSL execution remains uncovered (no host here) and is
+  still documented as untested in the README.
+- Leading-dash filename fixture (`-dash.log`): asserts the file is
+  never lost without an archive, whatever the platform `tar` decides
+  to do with a dash-prefixed member name.
+
 ## Unreleased (v2.0.0: skill architecture — brain + scripts + references + tests)
 
 - `SKILL.md` rewritten as the decision brain (Purpose, Use When,

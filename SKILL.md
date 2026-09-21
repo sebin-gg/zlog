@@ -6,7 +6,7 @@ compatibility: Linux, Windows 11 (Bash, Zsh, Git Bash, PowerShell)
 allowed-tools: Bash(scripts/zlog.sh:*) Read Write
 metadata:
   version: "2.0.0"
-  last_verified: "2026-09-20"
+  last_verified: "2026-09-21"
   registry: skills.sh
 ---
 

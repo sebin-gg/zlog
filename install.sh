@@ -6,7 +6,9 @@ set -e
 ZLOG_REF="${ZLOG_REF:-main}"
 TMP_FILE="$(mktemp)"
 trap 'rm -f "$TMP_FILE"' EXIT
-REPO_RAW="https://raw.githubusercontent.com/sebin-gg/zlog/${ZLOG_REF}"
+# ZLOG_REPO_RAW override exists for integration tests (file:// URL); users
+# should keep the default pinned GitHub raw host.
+REPO_RAW="${ZLOG_REPO_RAW:-https://raw.githubusercontent.com/sebin-gg/zlog/${ZLOG_REF}}"
 SKILL_FILES="SKILL.md scripts/zlog.sh scripts/zlog.ps1 references/agent-paths.md references/safety.md references/formats.md"
 
 # Skill dirs: primary (agentskills.io spec) + agent-specific locations if their parent exists

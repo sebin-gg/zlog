@@ -172,6 +172,13 @@ bash "$ZLOG_SH" clean > "$FX/clean5.txt"; cat "$FX/clean5.txt"
 check "newline archived" "[ ! -e \"\$NLFILE\" ] && (ls \"$ZLOG_TEST_ROOT\" | grep -q 'nl')"
 check "newline no tmp leftovers" "[ -z \"\$(ls $ZLOG_TEST_ROOT/ | grep 'tmp\\.' || true)\" ]"
 
+echo "--- leading-dash filename (never lost, whatever tar decides) ---"
+python3 -c "open('$ZLOG_TEST_ROOT/-dash.log','w').write('compressible log line\n'*2000)"
+touch -d '5 minutes ago' "$ZLOG_TEST_ROOT/-dash.log"
+bash "$ZLOG_SH" clean > "$FX/clean-dash.txt"; cat "$FX/clean-dash.txt"
+check "dash never lost" "[ -f $ZLOG_TEST_ROOT/-dash.log ] || ls $ZLOG_TEST_ROOT/-dash.log.* >/dev/null"
+check "dash no tmp leftovers" "[ -z \"\$(ls $ZLOG_TEST_ROOT/ | grep 'tmp\\.' || true)\" ]"
+
 echo "--- hardlinks compress independently ---"
 python3 -c "open('$ZLOG_TEST_ROOT/hard1.log','w').write('compressible log line\n'*2000)"
 ln "$ZLOG_TEST_ROOT/hard1.log" "$ZLOG_TEST_ROOT/hard2.log"

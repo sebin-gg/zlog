@@ -41,7 +41,7 @@ jobs:
           '
       - name: bash -n scripts, installer, tests
         run: |
-          for f in scripts/zlog.sh install.sh tests/test-posix.sh; do
+          for f in scripts/zlog.sh install.sh tests/test-posix.sh tests/test-install.sh; do
             bash -n "$f" || { echo "Error: $f failed bash -n"; exit 1; }
             echo "✓ $f passes bash -n"
           done
@@ -92,6 +92,8 @@ jobs:
         run: |
           set -o pipefail
           bash tests/test-posix.sh scripts/zlog.sh | tee "$RUNNER_TEMP/posix-tests.txt"
+      - name: Installer integration fixtures (stage/backup/rollback)
+        run: bash tests/test-install.sh
       - name: Require TOCTOU race regression (must run, not skip)
         run: |
           grep -q 'PASS: race source preserved' "$RUNNER_TEMP/posix-tests.txt" || { echo 'Error: POSIX race regression did not run'; exit 1; }

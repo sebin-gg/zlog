@@ -8,14 +8,16 @@
 
 ## Verification before every commit
 
-- `bash -n scripts/zlog.sh`, `bash -n install.sh`, `bash -n tests/test-posix.sh`.
+- `bash -n scripts/zlog.sh`, `bash -n install.sh`, `bash -n tests/test-posix.sh`,
+  `bash -n tests/test-install.sh`.
 - PowerShell parse check on `scripts/zlog.ps1` and `tests/test-powershell.ps1`
   (must report 0 errors, including on stock PS 5.1 syntax rules).
 - Frontmatter check: `SKILL.md` must start with `---` and contain
   `name`, `description`, `license`, `compatibility`, `allowed-tools`.
-- Behavioral tests (not just syntax): `bash tests/test-posix.sh` and
-  `tests/test-powershell.ps1` must pass — they cover prune, symlink
-  escape, purge age/lock, stale artifacts, size guard, locks, restore.
+- Behavioral tests (not just syntax): `bash tests/test-posix.sh`,
+  `bash tests/test-install.sh`, and `tests/test-powershell.ps1` must
+  pass — they cover prune, symlink escape, purge age/lock, stale
+  artifacts, size guard, locks, restore, installer backup/rollback.
 - Any `find` predicate change must keep the symlink-escape fixture green.
 
 ## Sync rule (v2 architecture)
