@@ -79,6 +79,17 @@
   bare `mv` remains on any destructive path; CI asserts the helper is
   used and bans `mv -f` codebase-wide.
 
+## Unreleased (review follow-up 4: wording + skip-proof race CI)
+
+- `SKILL.md` no longer says "byte-identical (inode/size/mtime)": the
+  invariant is "source identity unchanged", with the platform
+  mechanisms spelled out (POSIX inode/size/mtime, Windows
+  length/timestamps/full-content SHA-256).
+- CI now requires the TOCTOU race regressions to actually run, not
+  skip: both behavior jobs grep their fixture output for
+  `PASS: race source preserved` and fail otherwise (ubuntu provides
+  `zstd`; `windows-latest` provides function shadowing).
+
 ## Unreleased (v2.0.0: skill architecture — brain + scripts + references + tests)
 
 - `SKILL.md` rewritten as the decision brain (Purpose, Use When,

@@ -62,7 +62,8 @@ Full rationale: `references/safety.md`. Non-negotiable invariants:
 - Never compress a locked or fresh file; never clean caches unprompted.
 - Never delete a source unless its archive passed integrity test AND is
   smaller than the source AND the destination was absent AND the source
-  is byte-identical (inode/size/mtime) to when it was scanned
+  identity is unchanged since it was scanned — POSIX: inode/size/mtime;
+  Windows: length/timestamps/full-content SHA-256
   (transactional: temp → test → size check → dest-absent check →
   source-unchanged check → publish-without-overwrite → delete).
 - Restore never overwrites: unknown formats refused, existing
