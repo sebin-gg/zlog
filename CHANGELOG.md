@@ -91,7 +91,6 @@
   `zstd`; `windows-latest` provides function shadowing).
 
 ## Unreleased (review follow-up 5: installer tests, metadata, edges)
-
 - `SKILL.md` `last_verified` touched to 2026-09-21.
 - `install.sh` accepts a `ZLOG_REPO_RAW` override (default unchanged)
   so integration tests can install from a local `file://` repo.
@@ -109,6 +108,12 @@
   pass on Debian WSL2. That box has no `fuser`/`lsof`, so the run also
   covers the age-buffer fallback. README/SKILL.md now list WSL as
   tested; macOS remains untested (no host).
+- macOS runtime-tested: new `behavior-macos` CI job on
+  `macos-latest` runs the full POSIX + installer suites plus the race
+  gate, all green. `tests/test-posix.sh` is now portable (python-based
+  mtime helper instead of GNU `touch -d`, `md5` fallback for missing
+  `md5sum`); the implementation needed no changes. README/SKILL.md
+  now list macOS as tested — every supported platform is covered.
 
 ## Unreleased (v2.0.0: skill architecture — brain + scripts + references + tests)
 

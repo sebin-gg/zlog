@@ -39,7 +39,7 @@ curl -fsSL https://raw.githubusercontent.com/sebin-gg/zlog/main/install.sh | bas
 - **Process Lock Safe (best-effort)**: Checks kernel locks via `fuser -s` (Linux/WSL) or `lsof` (macOS), and `[System.IO.File]::Open` (Windows). If neither `fuser` nor `lsof` is available (minimal containers), safety falls back to a 60s age buffer — see FAQ.
 - **Memory Context Intact**: Transcripts, configs, and live databases are excluded by filter (see `references/safety.md` data classes).
 - **Single-Line Output**: Condenses multi-folder scan results into one clean line (`253M total`).
-- **Cross-Platform Scripts**: POSIX (`scripts/zlog.sh`) and Windows 11 PowerShell (`scripts/zlog.ps1`) implementations with the same candidate rules and savings reporting. Linux, WSL, and Windows 11 are tested (CI runs POSIX fixtures on Ubuntu and PowerShell fixtures on Windows; the full POSIX + installer suites also pass on Debian WSL); macOS ships with `stat -f` / `lsof` fallbacks but is not runtime-tested here.
+- **Cross-Platform Scripts**: POSIX (`scripts/zlog.sh`) and Windows 11 PowerShell (`scripts/zlog.ps1`) implementations with the same candidate rules and savings reporting. Linux, WSL, macOS, and Windows 11 are all tested (CI runs POSIX fixtures on Ubuntu and macOS, PowerShell fixtures on Windows; the full POSIX + installer suites also pass on Debian WSL).
 - **Junk-Pruned Hybrid Deep Scan**: Never descends into `Caches`/`node_modules`/GPU-cache junk or `.git`; capped at depth 12 — fast, future-proof, bounded. Compressed artifacts are verified before counting.
 
 ---
@@ -155,9 +155,9 @@ The output is a single summary line: file count, raw → compressed, savings per
 ## Compatibility
 
 - **Linux**: Bash/Zsh snippets tested.
+- **macOS**: full POSIX + installer suites pass on `macos-latest` CI (BSD `stat -f` / `lsof` paths exercised).
 - **WSL**: full POSIX + installer suites pass on Debian WSL2 (xz/gzip plus zstd 1.5.7; no `fuser`/`lsof` on that box, so lock checks fall back to the 60s age buffer — also covered).
 - **Windows 11**: PowerShell snippet verified on stock PS 5.1 (sandbox: compress/skip/purge/lock/junk/space-in-path).
-- **macOS**: snippets ship with `stat -f` / `lsof` fallbacks but are not runtime-tested here.
 
 ---
 
