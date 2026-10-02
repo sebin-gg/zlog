@@ -63,6 +63,10 @@ jobs:
             mkdir -p "$FX/repo/$(dirname "$f")"
             cp "$f" "$FX/repo/$f"
           done
+          # export in-step (GITHUB_ENV only lands in *later* steps) and persist
+          # for the following steps, so the installer never touches the
+          # runner's real home.
+          export HOME="$FX/home"
           echo "HOME=$FX/home" >> "$GITHUB_ENV"
           ZLOG_REPO_RAW="file://$FX/repo" bash ./install.sh
           DEST="$FX/home/.agents/skills/zlog"
