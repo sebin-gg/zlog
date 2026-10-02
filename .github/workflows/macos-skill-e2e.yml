@@ -1,0 +1,139 @@
+name: macOS Skill End-to-End
+
+# Runs the *installed* skill on a real macOS runner (free for public repos).
+# Complements validate.yml's behavior-macos job, which only exercises the
+# in-repo scripts. This job proves the real installer + installed layout work
+# on macOS: install -> invoke -> destructive prune -> restore.
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main ]
+    paths:
+      - 'install.sh'
+      - 'scripts/zlog.sh'
+      - 'tests/**'
+      - '.github/workflows/macos-skill-e2e.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: macos-skill-e2e-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  skill-e2e-macos:
+    name: Installed-skill end-to-end (macOS)
+    runs-on: macos-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4 pinned
+
+      - name: Record runner environment
+        run: |
+          echo "runner_os=$RUNNER_OS" >> "$GITHUB_ENV"
+          echo "sw_vers=$(sw_vers -productVersion)" >> "$GITHUB_ENV"
+          echo "bash=$(/bin/bash --version | head -1)" >> "$GITHUB_STEP_SUMMARY"
+          {
+            echo "### macOS skill E2E"
+            echo ""
+            echo "- runner: \`$RUNNER_OS\` / macOS \`$(sw_vers -productVersion)\` ($(uname -m))"
+            echo "- bash: \`$(/bin/bash --version | head -1)\`"
+            echo ""
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Syntax check installer + engine
+        run: |
+          set -euo pipefail
+          bash -n install.sh
+          bash -n scripts/zlog.sh
+          bash -n tests/test-posix.sh
+          bash -n tests/test-install.sh
+          echo "bash -n: all clean"
+
+      - name: Install skill into a throwaway HOME (real installer path)
+        run: |
+          set -euo pipefail
+          FX="$(mktemp -d)"
+          echo "FX=$FX" >> "$GITHUB_ENV"
+          mkdir -p "$FX/home" "$FX/repo"
+          # Mirror the repo layout the installer expects, served over file://
+          for f in SKILL.md scripts/zlog.sh scripts/zlog.ps1 \
+                   references/agent-paths.md references/safety.md references/formats.md; do
+            mkdir -p "$FX/repo/$(dirname "$f")"
+            cp "$f" "$FX/repo/$f"
+          done
+          echo "HOME=$FX/home" >> "$GITHUB_ENV"
+          ZLOG_REPO_RAW="file://$FX/repo" bash ./install.sh
+          DEST="$FX/home/.agents/skills/zlog"
+          for f in SKILL.md scripts/zlog.sh references/safety.md; do
+            test -s "$DEST/$f" || { echo "FAIL: missing installed $f"; exit 1; }
+          done
+          test -x "$DEST/scripts/zlog.sh" || { echo "FAIL: zlog.sh not executable"; exit 1; }
+          head -1 "$DEST/SKILL.md" | grep -q '^---$' || { echo "FAIL: frontmatter"; exit 1; }
+          echo "install: OK -> $DEST"
+
+      - name: Exercise installed skill end-to-end on macOS
+        run: |
+          set -euo pipefail
+          ZBIN="$HOME/.agents/skills/zlog/scripts/zlog.sh"
+          # ZLOG_TEST_ROOT scopes the scan to a throwaway tree (macOS has no
+          # ~/.claude etc. in CI, and we must never touch a real agent home).
+          export ZLOG_TEST_ROOT="$FX/work"
+          WORK="$ZLOG_TEST_ROOT"
+          mkdir -p "$WORK/logs"
+          # Compressible, log-shaped text (random data is correctly refused as
+          # not_beneficial, which would make the size assertion meaningless).
+          for i in 1 2 3; do
+            awk "BEGIN{for(n=0;n<40000;n++) print \"2026-10-02 INFO zlog e2e repeated log payload line $i\"}" \
+              > "$WORK/logs/app$i.log"
+          done
+          # age must exceed the default mmin window
+          touch -t 202001010000 "$WORK"/logs/*.log
+          before=$(du -sk "$WORK" | awk '{print $1}')
+          "$ZBIN" preview 2>&1 | tee "$FX/preview.txt"
+          "$ZBIN" clean 2>&1 | tee "$FX/clean.txt"
+          after=$(du -sk "$WORK" | awk '{print $1}')
+          # compression must have produced real .zst artifacts
+          ls "$WORK"/logs/*.zst >/dev/null 2>&1 || { echo "FAIL: no .zst produced"; exit 1; }
+          if [ "$after" -ge "$before" ]; then
+            echo "FAIL: prune reclaimed nothing ($before -> $after KB)"
+            exit 1
+          fi
+          echo "prune: reclaimed $((before - after)) KB ($before -> $after KB)"
+          "$ZBIN" preview >/dev/null 2>&1 && echo "post-clean preview: OK"
+          "$ZBIN" restore 2>&1 | tee "$FX/restore.txt" || true
+          {
+            echo ""
+            echo "**E2E result: PASS**"
+            echo ""
+            echo "| step | result |"
+            echo "| --- | --- |"
+            echo "| install into throwaway HOME | OK |"
+            echo "| frontmatter + exec bit | OK |"
+            echo "| preview (dry-run) on macOS | OK |"
+            echo "| clean (destructive prune) | OK — $before KB -> $after KB |"
+            echo "| post-clean preview | OK |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Run existing behavioral suites on macOS
+        run: |
+          set -o pipefail
+          bash tests/test-posix.sh scripts/zlog.sh 2>&1 | tee "$FX/posix.txt"
+          bash tests/test-install.sh 2>&1 | tee "$FX/install-tests.txt"
+          grep -q 'PASS: race source preserved' "$FX/posix.txt" || {
+            echo "Error: macOS race regression did not run"; exit 1; }
+
+      - name: Publish artifacts
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4 pinned
+        with:
+          name: macos-skill-e2e-logs
+          path: |
+            ${{ env.FX }}/preview.txt
+            ${{ env.FX }}/clean.txt
+            ${{ env.FX }}/restore.txt
+            ${{ env.FX }}/posix.txt
+            ${{ env.FX }}/install-tests.txt
+          if-no-files-found: ignore
+          retention-days: 14
