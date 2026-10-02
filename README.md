@@ -155,7 +155,7 @@ The output is a single summary line: file count, raw → compressed, savings per
 ## Compatibility
 
 - **Linux**: Bash/Zsh snippets tested.
-- **macOS**: full POSIX + installer suites pass on `macos-latest` CI (BSD `stat -f` / `lsof` paths exercised).
+- **macOS**: full POSIX + installer suites pass on `macos-latest` CI (BSD `stat -f` / `lsof` paths exercised). The installed skill is also verified end-to-end on a real macOS runner — `macos-skill-e2e` installs into a throwaway `HOME`, then previews, prunes, and re-previews (macOS 26.6.2, arm64: 6216 KB → 12 KB reclaimed).
 - **WSL**: full POSIX + installer suites pass on Debian WSL2 (xz/gzip plus zstd 1.5.7; no `fuser`/`lsof` on that box, so lock checks fall back to the 60s age buffer — also covered).
 - **Windows 11**: PowerShell snippet verified on stock PS 5.1 (sandbox: compress/skip/purge/lock/junk/space-in-path).
 
