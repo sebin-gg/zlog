@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- Repository-wide review pass: no behavioural change in this entry; it exists
+  to carry the CodeRabbit full-review findings for this skill.
+
 ## Unreleased (hardening: collision, TOCTOU, restore, deep-scan, installer, CI)
 
 - Compression no longer overwrites an existing archive: the destination
