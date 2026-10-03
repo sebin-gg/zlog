@@ -232,11 +232,15 @@ echo "--- --older-than is decimal, not octal, and bounded ---"
 # and `08` is a hard "value too great for base" error that used to be swallowed.
 # Large values also overflow `days * 1440` into a wrong (possibly negative)
 # -mmin threshold, selecting the wrong files.
-for v in 0 00 000 7 08 09 010 0010 00010 36500; do
+for v in 0 00 000 00010 7 08 09 010 0010 00010 36500; do
   out=$(bash "$ZLOG_SH" preview --older-than "$v" 2>&1); rc=$?
   check "--older-than '$v' accepted as decimal" "[ $rc -eq 0 ]"
+  # Accepting must also be silent. Stripping the zeros from 0/00/000 used to
+  # leave an empty string, so `10#` errored on stderr while the script still
+  # exited 0 — an rc-only assertion missed it.
+  check "--older-than '$v' emits no shell error" "! printf '%s' \"\$out\" | grep -qiE 'invalid integer|value too great|unbound variable'"
 done
-for v in 36501 99999999999 99999999999999999999; do
+for v in 36501 99999 18446744073709551616 99999999999999999999; do
   out=$(bash "$ZLOG_SH" preview --older-than "$v" 2>&1); rc=$?
   check "--older-than '$v' rejected (out of range)" "[ $rc -eq 2 ]"
   check "--older-than '$v' explains the bound" "printf '%s' \"\$out\" | grep -qi '36500'"

@@ -29,19 +29,20 @@ if [ "${1:-}" = "--older-than" ]; then
       exit 2
       ;;
   esac
-  # Strip leading zeros before arithmetic. Bash reads a leading-zero literal as
-  # octal, so `010` would silently mean 8 days and `08` is a hard "value too
-  # great for base" error. `10#` alone does not help for a bare `08`, hence the
-  # normalisation first.
-  ZLOG_DAYS=$(( 10#${ZLOG_DAYS#"${ZLOG_DAYS%%[!0]*}"} ))
-  # Bound the value: `days * 1440` overflows 64-bit arithmetic on large inputs,
-  # which would silently wrap to a small or negative -mmin threshold and select
-  # the wrong files in `clean` / `deep`.
-  if [ "$ZLOG_DAYS" -gt 36500 ]; then
-    echo "zlog: --older-than must be 36500 days (100 years) or less, got: '$ZLOG_DAYS'" >&2
+  # Normalise as a *string* first. Bash reads a leading-zero literal as octal,
+  # so `010` would silently mean 8 days and `08` is a hard "value too great for
+  # base" error. Stripping the zeros from `0`/`00`/`000` yields an empty string,
+  # so restore a single `0` before the arithmetic ever runs.
+  ZLOG_DAYS="${ZLOG_DAYS#"${ZLOG_DAYS%%[!0]*}"}"
+  [ -n "$ZLOG_DAYS" ] || ZLOG_DAYS="0"
+  # Range-check as a string, *before* arithmetic. Converting first lets a value
+  # such as 18446744073709551616 wrap to 0 during the conversion and slip past
+  # the bound, and `days * 1440` overflows 64-bit arithmetic well before that.
+  if [ "${#ZLOG_DAYS}" -gt 5 ] || { [ "${#ZLOG_DAYS}" -eq 5 ] && [ "$ZLOG_DAYS" -gt 36500 ]; }; then
+    echo "zlog: --older-than must be 36500 days (100 years) or less, got: '${ZLOG_DAYS}'" >&2
     exit 2
   fi
-  ZLOG_MMIN="+$(( ZLOG_DAYS * 1440 + 1 ))"
+  ZLOG_MMIN="+$(( 10#$ZLOG_DAYS * 1440 + 1 ))"
 fi
 
 PRUNE=(-name node_modules -o -name Caches -o -name Cache -o -name "Code Cache" \
