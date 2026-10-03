@@ -9,6 +9,13 @@ Fixed:
   built a nonsense `find -mmin "+-7199"` that reported zero candidates — a
   silent "nothing to do" on a destructive path. Both now exit 2 with a clear
   message; `0` and positive values are unaffected.
+- `--older-than` is read as decimal, not octal. Bash treats a leading-zero
+  literal as octal, so `010` silently meant 8 days instead of 10, and `08`
+  was a hard "value too great for base" error that was swallowed. Leading
+  zeros are now stripped and the value forced to base 10.
+- `--older-than` is bounded to 36500 days. `days * 1440` overflows 64-bit
+  arithmetic on large inputs, wrapping to a small or negative `-mmin`
+  threshold that would select the wrong files in `clean` / `deep`.
 - `restore` accepts a legitimately empty archive. The `-s` (non-empty) guard
   rejected a 0-byte decompression, so restoring an empty `.log`/`.out`
   reported FAILED and deleted its own output. Corrupt archives are still
