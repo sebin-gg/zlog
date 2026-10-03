@@ -17,8 +17,32 @@ ZLOG_MMIN="+1"
 MODE="${1:-}"
 shift || true
 if [ "${1:-}" = "--older-than" ]; then
-  ZLOG_MMIN="+$(( ${2:-0} * 1440 + 1 ))"
-  shift 2 || true
+  # Validate before using the value in arithmetic. An unvalidated value either
+  # aborts the whole script with `set -u` ("abc: unbound variable") or, when
+  # negative, builds a nonsense `find -mmin "+-7199"` that silently reports
+  # zero candidates — a false "nothing to do" on a destructive path.
+  ZLOG_DAYS="${2:-}"
+  shift 2 2>/dev/null || shift $# 2>/dev/null || true
+  case "$ZLOG_DAYS" in
+    ''|*[!0-9]*)
+      echo "zlog: --older-than needs a non-negative whole number of days, got: '${ZLOG_DAYS}'" >&2
+      exit 2
+      ;;
+  esac
+  # Normalise as a *string* first. Bash reads a leading-zero literal as octal,
+  # so `010` would silently mean 8 days and `08` is a hard "value too great for
+  # base" error. Stripping the zeros from `0`/`00`/`000` yields an empty string,
+  # so restore a single `0` before the arithmetic ever runs.
+  ZLOG_DAYS="${ZLOG_DAYS#"${ZLOG_DAYS%%[!0]*}"}"
+  [ -n "$ZLOG_DAYS" ] || ZLOG_DAYS="0"
+  # Range-check as a string, *before* arithmetic. Converting first lets a value
+  # such as 18446744073709551616 wrap to 0 during the conversion and slip past
+  # the bound, and `days * 1440` overflows 64-bit arithmetic well before that.
+  if [ "${#ZLOG_DAYS}" -gt 5 ] || { [ "${#ZLOG_DAYS}" -eq 5 ] && [ "$ZLOG_DAYS" -gt 36500 ]; }; then
+    echo "zlog: --older-than must be 36500 days (100 years) or less, got: '${ZLOG_DAYS}'" >&2
+    exit 2
+  fi
+  ZLOG_MMIN="+$(( 10#$ZLOG_DAYS * 1440 + 1 ))"
 fi
 
 PRUNE=(-name node_modules -o -name Caches -o -name Cache -o -name "Code Cache" \
@@ -308,15 +332,15 @@ do_restore() {
       # failure must never leave a partial file at the destination.
       *.zst) tmp="$out.$$.tmp.restore"; rm -f "$tmp" 2>/dev/null
         if command -v zstd >/dev/null 2>&1 && zstd -d -q "$a" -o "$tmp" 2>/dev/null \
-          && [ -s "$tmp" ] && zlog_publish "$tmp" "$out"; then rc=0; else rc=1; rm -f "$tmp" 2>/dev/null; fi ;;
+          && [ -f "$tmp" ] && zlog_publish "$tmp" "$out"; then rc=0; else rc=1; rm -f "$tmp" 2>/dev/null; fi ;;
       *.gz) tmp="$out.$$.tmp.restore"; rm -f "$tmp" 2>/dev/null
         if gzip -d -c "$a" > "$tmp" 2>/dev/null \
-          && [ -s "$tmp" ] && zlog_publish "$tmp" "$out"; then rc=0; else rc=1; rm -f "$tmp" 2>/dev/null; fi ;;
+          && [ -f "$tmp" ] && zlog_publish "$tmp" "$out"; then rc=0; else rc=1; rm -f "$tmp" 2>/dev/null; fi ;;
       *.xz) tmp="$out.$$.tmp.restore"; rm -f "$tmp" 2>/dev/null
         if command -v xz >/dev/null 2>&1 && xz -d -c "$a" > "$tmp" 2>/dev/null \
-          && [ -s "$tmp" ] && zlog_publish "$tmp" "$out"; then rc=0; else rc=1; rm -f "$tmp" 2>/dev/null; fi ;;
+          && [ -f "$tmp" ] && zlog_publish "$tmp" "$out"; then rc=0; else rc=1; rm -f "$tmp" 2>/dev/null; fi ;;
     esac
-    if [ "$rc" -eq 0 ] && [ -s "$out" ]; then echo "[zlog] RESTORED: $out (archive preserved)"; ok=$((ok + 1)); else rm -f "$out" 2>/dev/null; echo "[zlog] FAILED: $a (nothing written)"; fail=$((fail + 1)); fi
+    if [ "$rc" -eq 0 ] && [ -f "$out" ]; then echo "[zlog] RESTORED: $out (archive preserved)"; ok=$((ok + 1)); else rm -f "$out" 2>/dev/null; echo "[zlog] FAILED: $a (nothing written)"; fail=$((fail + 1)); fi
   done
   echo "[zlog] restore: ok=$ok failed=$fail"
   [ "$fail" -eq 0 ]

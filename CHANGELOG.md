@@ -2,8 +2,32 @@
 
 ## Unreleased
 
-- Repository-wide review pass: no behavioural change in this entry; it exists
-  to carry the CodeRabbit full-review findings for this skill.
+Fixed:
+
+- `--older-than` now validates its argument. A non-numeric value aborted the
+  script under `set -u` with `abc: unbound variable`, and a negative value
+  built a nonsense `find -mmin "+-7199"` that reported zero candidates — a
+  silent "nothing to do" on a destructive path. Both now exit 2 with a clear
+  message; `0` and positive values are unaffected.
+- `--older-than` is read as decimal, not octal. Bash treats a leading-zero
+  literal as octal, so `010` silently meant 8 days instead of 10, and `08`
+  was a hard "value too great for base" error that was swallowed. Leading
+  zeros are now stripped, an all-zero value is preserved as `0`, and the
+  result is forced to base 10.
+- `--older-than` is bounded to 36500 days, checked on the digit string *before*
+  any arithmetic. Converting first let `18446744073709551616` wrap to 0 during
+  the conversion and slip past the bound, and `days * 1440` overflows 64-bit
+  arithmetic well before that.
+- `restore` accepts a legitimately empty archive. The `-s` (non-empty) guard
+  rejected a 0-byte decompression, so restoring an empty `.log`/`.out`
+  reported FAILED and deleted its own output. Corrupt archives are still
+  rejected with nothing written, because the decoders themselves exit non-zero.
+
+Tests:
+
+- `tests/test-posix.sh` covers `--older-than` rejection (non-numeric, negative,
+  fractional, empty, whitespace, exponent) and acceptance of `0`/positive, plus
+  empty-archive restore and corrupt-archive rejection with no partial write.
 
 ## Unreleased (hardening: collision, TOCTOU, restore, deep-scan, installer, CI)
 

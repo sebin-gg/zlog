@@ -211,5 +211,56 @@ else
 fi
 chmod 644 "$ZLOG_TEST_ROOT/noperm.log" 2>/dev/null; rm -f "$ZLOG_TEST_ROOT/noperm.log"
 
+echo "--- --older-than rejects non-numeric and negative values ---"
+# Unvalidated, these either abort under `set -u` ("abc: unbound variable") or
+# build a nonsense `find -mmin "+-7199"` that reports zero candidates, which
+# reads as a clean bill of health on a destructive path.
+for bad in abc -5 1.5 "" " " 1e3; do
+  out=$(bash "$ZLOG_SH" preview --older-than "$bad" 2>&1); rc=$?
+  check "--older-than '$bad' rejected (rc=2)" "[ $rc -eq 2 ]"
+  check "--older-than '$bad' explains itself" "printf '%s' \"\$out\" | grep -qi 'non-negative'"
+done
+out=$(bash "$ZLOG_SH" preview --older-than 2>&1); rc=$?
+check "--older-than with no value rejected (rc=2)" "[ $rc -eq 2 ]"
+out=$(bash "$ZLOG_SH" preview --older-than 0 2>&1); rc=$?
+check "--older-than 0 accepted" "[ $rc -eq 0 ]"
+out=$(bash "$ZLOG_SH" preview --older-than 7 2>&1); rc=$?
+check "--older-than 7 accepted" "[ $rc -eq 0 ]"
+
+echo "--- --older-than is decimal, not octal, and bounded ---"
+# Bash reads a leading-zero literal as octal: `010` would silently mean 8 days
+# and `08` is a hard "value too great for base" error that used to be swallowed.
+# Large values also overflow `days * 1440` into a wrong (possibly negative)
+# -mmin threshold, selecting the wrong files.
+for v in 0 00 000 00010 7 08 09 010 0010 00010 36500; do
+  out=$(bash "$ZLOG_SH" preview --older-than "$v" 2>&1); rc=$?
+  check "--older-than '$v' accepted as decimal" "[ $rc -eq 0 ]"
+  # Accepting must also be silent. Stripping the zeros from 0/00/000 used to
+  # leave an empty string, so `10#` errored on stderr while the script still
+  # exited 0 — an rc-only assertion missed it.
+  check "--older-than '$v' emits no shell error" "! printf '%s' \"\$out\" | grep -qiE 'invalid integer|value too great|unbound variable'"
+done
+for v in 36501 99999 18446744073709551616 99999999999999999999; do
+  out=$(bash "$ZLOG_SH" preview --older-than "$v" 2>&1); rc=$?
+  check "--older-than '$v' rejected (out of range)" "[ $rc -eq 2 ]"
+  check "--older-than '$v' explains the bound" "printf '%s' \"\$out\" | grep -qi '36500'"
+done
+
+echo "--- restoring an empty file succeeds ---"
+# A 0-byte original is a legitimate `.log`. The old `-s` guard demanded a
+# non-empty temp file, so every empty archive reported FAILED and deleted its
+# own output. Corrupt archives must still be rejected with nothing written.
+RD="$FX/restore-empty"; mkdir -p "$RD"
+: > "$RD/empty.log"; gzip -9 -c "$RD/empty.log" > "$RD/empty.log.gz" 2>/dev/null
+rm -f "$RD/empty.log"
+out=$(bash "$ZLOG_SH" restore "$RD/empty.log.gz" 2>&1); rc=$?
+check "empty restore succeeds" "[ $rc -eq 0 ] && [ -f '$RD/empty.log' ]"
+check "empty restore reports RESTORED" "printf '%s' \"\$out\" | grep -q RESTORED"
+printf 'NOT A VALID GZIP STREAM' > "$RD/corrupt.log.gz"
+out=$(bash "$ZLOG_SH" restore "$RD/corrupt.log.gz" 2>&1); rc=$?
+check "corrupt archive still rejected" "[ $rc -ne 0 ]"
+check "corrupt archive writes nothing" "[ ! -e '$RD/corrupt.log' ]"
+check "corrupt leaves no tmp" "[ -z \"\$(ls $RD | grep 'tmp' || true)\" ]"
+
 if [ "$fail" -eq 0 ]; then echo "POSIX TESTS ALL PASS"; else echo "POSIX TESTS FAILED"; fi
 exit $fail
