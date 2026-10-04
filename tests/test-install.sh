@@ -41,11 +41,18 @@ echo "--- upgrade backs up whole previous dir ---"
 echo "OLD-MARKER" >> "$DEST/SKILL.md"
 ZLOG_REPO_RAW="file://$FX/repo" bash "$REPO/install.sh" > "$FX/i2.txt" \
   || { echo "FAIL: upgrade exited nonzero"; fail=1; }
-BACKUP="$(ls -d "$DEST".bak.* 2>/dev/null | head -n 1)"
-check "backup dir created" "[ -n \"$BACKUP\" ] && [ -d \"$BACKUP\" ]"
+# Backups now live one level down: $(basename "$DEST").bak.XXXXXXXXXX/zlog/.
+# The container is the atomically-reserved mktemp -d; the skill is moved in as a
+# named child so `mv` can never nest it inside a directory that raced us.
+SKILL_NAME="$(basename "$DEST")"
+CONTAINER="$(ls -d "$DEST".bak.* 2>/dev/null | head -n 1)"
+BACKUP="$CONTAINER/$SKILL_NAME"
+check "backup container created" "[ -n \"$CONTAINER\" ] && [ -d \"$CONTAINER\" ]"
+check "backup dir created" "[ -d \"$BACKUP\" ]"
 check "backup has old content" "grep -q OLD-MARKER \"$BACKUP/SKILL.md\""
 check "live dir fresh" "! grep -q OLD-MARKER \"$DEST/SKILL.md\""
 check "backup is full skill" "[ -s \"$BACKUP/scripts/zlog.sh\" ] && [ -s \"$BACKUP/references/safety.md\" ]"
+check "skill not nested inside a stray dir" "[ ! -d \"$BACKUP/$SKILL_NAME\" ]"
 
 echo "--- invalid skill aborts, live untouched ---"
 cp "$DEST/SKILL.md" "$FX/live-skill.bak"
@@ -108,7 +115,7 @@ check "two distinct backups survive a same-second reinstall" "[ \"$BACKUPS\" -ge
 if [ "$BACKUPS" -ge 2 ] 2>/dev/null; then
   kept=0
   for b in "$DEST".bak.*; do
-    grep -q 'MARKER-' "$b/SKILL.md" 2>/dev/null && kept=$((kept + 1))
+    grep -q 'MARKER-' "$b/$SKILL_NAME/SKILL.md" 2>/dev/null && kept=$((kept + 1))
   done
   check "each backup still holds its own content" "[ $kept -ge 2 ]"
 fi

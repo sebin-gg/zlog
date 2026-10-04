@@ -13,14 +13,42 @@
 #   --older-than DAYS  only touch files older than DAYS (default: 0 = 60s age buffer)
 set -u
 
-# Temp artifacts are written next to their source (same filesystem, so publish
-# can hardlink them into place) and named with $$. Record every one so an
-# interrupt cannot leave them behind: the suite asserts "no tmp leftovers", but
-# only ever after a clean exit.
+# Two independent kinds of on-disk debris, with OPPOSITE cleanup semantics:
+#
+#   ZLOG_TEMPS  — partial archives we created. Safe to delete outright.
+#   ZLOG_QSRC   — a file we *renamed* out of the way in order to test it without
+#                 racing a writer. NOT ours to delete: it may hold live data.
+#                 On any exit path it is renamed back to ZLOG_QDST.
+#
+# Conflating the two would turn an interrupt into data loss, so they are kept
+# apart and quarantined files are restored, never removed.
 ZLOG_TEMPS=()
+ZLOG_QSRC=()
+ZLOG_QDST=()
 zlog_track() { ZLOG_TEMPS+=("$1"); }
+zlog_quarantine_add() { ZLOG_QSRC+=("$1"); ZLOG_QDST+=("$2"); }
+zlog_quarantine_drop() {
+  # Always the most recent entry (add/resolve are strictly paired and LIFO), so
+  # unsetting the last index keeps the arrays contiguous.
+  local n=${#ZLOG_QSRC[@]}
+  [ "$n" -gt 0 ] && unset "ZLOG_QSRC[$((n - 1))]" "ZLOG_QDST[$((n - 1))]"
+  return 0
+}
+zlog_restore_quarantine() {
+  local i
+  for i in ${!ZLOG_QSRC[@]+"${!ZLOG_QSRC[@]}"}; do
+    [ -n "${ZLOG_QSRC[$i]:-}" ] || continue
+    # Only move back if the quarantined file still exists and the original name
+    # is still free; `mv -n` never overwrites either way.
+    if [ -e "${ZLOG_QSRC[$i]}" ] && [ ! -e "${ZLOG_QDST[$i]}" ]; then
+      mv -n "${ZLOG_QSRC[$i]}" "${ZLOG_QDST[$i]}" 2>/dev/null || true
+    fi
+  done
+  return 0
+}
 zlog_cleanup() {
   local t
+  zlog_restore_quarantine
   for t in ${ZLOG_TEMPS[@]+"${ZLOG_TEMPS[@]}"}; do
     [ -n "$t" ] && rm -rf "$t" 2>/dev/null
   done
@@ -240,28 +268,65 @@ do_preview() {
   echo "[DRY-RUN] Total: $candidates files, $(zlog_hum "$raw") raw (compressed size varies by log content; run clean for measured savings)"
 }
 
+zlog_purge_empty() {
+  # Delete a file only if it is *still* empty.
+  #
+  # A path-based "check then unlink" can never be atomic, and two back-to-back
+  # zlog_ident reads prove nothing — no work runs between them, so they only
+  # catch a write landing in the microseconds that separate them. Instead,
+  # rename the file out of the way FIRST:
+  #
+  #   * once renamed, a writer that opens by path cannot reach the file at all;
+  #   * a writer holding an already-open descriptor is what zlog_locked screens
+  #     for, and it runs before this;
+  #   * on Windows an open handle blocks File.Move outright, which is stronger.
+  #
+  # Only then test emptiness. If anything landed in it, put it back untouched.
+  # Identity hashing is deliberately NOT used here: for a file that was empty,
+  # any write makes it non-empty, so the size test already covers every case a
+  # content hash would — and zlog_ident hashes whole files, which on the
+  # PowerShell side is a SHA-256 per call.
+  #
+  # Returns 0 = purged, 1 = gained content (skipped), 2 = could not resolve.
+  local src="$1" q="$1.$$.purge"
+  zlog_quarantine_add "$q" "$src"
+  # Key the decision on the ARTIFACT, not on mv's exit status. If the process
+  # group is signalled while the rename is in flight the rename may well have
+  # happened before mv was killed, so a non-zero status does not mean "nothing
+  # moved" — trusting it here would drop the restore record and orphan the file.
+  mv -n "$src" "$q" 2>/dev/null || true
+  # `-f`, not `-e`: a directory at the quarantine path would satisfy `-e` and be
+  # mistaken for a successful rename. A 0-byte file still satisfies `-f`.
+  if [ ! -f "$q" ]; then
+    zlog_quarantine_drop
+    return 2
+  fi
+  if [ -s "$q" ]; then
+    mv -n "$q" "$src" 2>/dev/null || true
+    zlog_quarantine_drop
+    return 1
+  fi
+  local rc=0
+  rm -f "$q" 2>/dev/null || rc=2
+  zlog_quarantine_drop
+  return $rc
+}
+
 do_clean() {
   local roots=0 candidates=0 compressed=0 raw=0 saved=0 purged=0 skipped=0 failed=0 notbene=0 locked=0
-  local ppre="" pcur=""
   while IFS= read -r -d '' d; do
     roots=$((roots + 1))
     while IFS= read -r -d '' f; do
       [ -z "$f" ] && continue
       if zlog_locked "$f"; then locked=$((locked + 1)); skipped=$((skipped + 1)); continue; fi
-      # find(1) decided this file was empty, but a writer may have appended
-      # since that decision. Re-read the identity and the size immediately
-      # before the destructive step and skip on any change, mirroring the two
-      # zlog_ident checks the compress path already makes. zlog_locked is not
-      # a substitute: lsof/fuser miss a writer that opened, wrote and closed
-      # inside the window, and without this the loss is reported as
-      # `purged=1 failed=0` — invisible.
-      ppre=$(zlog_ident "$f" 2>/dev/null) || ppre=""
-      if [ -z "$ppre" ]; then failed=$((failed + 1)); continue; fi
-      pcur=$(zlog_ident "$f" 2>/dev/null) || pcur=""
-      if [ -z "$pcur" ] || [ "$pcur" != "$ppre" ] || [ -s "$f" ]; then
-        skipped=$((skipped + 1)); continue
-      fi
-      if rm -f "$f" 2>/dev/null; then purged=$((purged + 1)); else failed=$((failed + 1)); fi
+      # Quarantine-then-verify; see zlog_purge_empty for why the rename is the
+      # load-bearing part and why no identity hash is needed on this path.
+      zlog_purge_empty "$f"
+      case "$?" in
+        0) purged=$((purged + 1)) ;;
+        1) skipped=$((skipped + 1)) ;;
+        *) failed=$((failed + 1)) ;;
+      esac
     done < <(zlog_purge_candidates "$d") || true
     while IFS= read -r -d '' f; do
       [ -z "$f" ] && continue

@@ -10,14 +10,27 @@ Fixed:
   failure path's `rm -f "$out"` destroyed a file zlog never created — while
   printing "nothing written". The guard now also tests `[ -L ]`, and the
   cleanup only runs when this invocation actually published the destination.
-- The empty-file **purge path no longer has a TOCTOU window**. `find -empty`
-  decided a file was empty, then a bare `rm -f` deleted it with no identity
-  re-check, so a process that appended in between lost its data — and the run
-  was reported as `purged=1 failed=0`, making the loss invisible. The purge
-  loop now re-reads the inode/size/mtime and re-tests emptiness immediately
-  before deleting, mirroring the two checks the compression path already made.
-  `lsof`/`fuser` is not a substitute: it misses a writer that opened, wrote and
-  closed inside the window.
+- The empty-file **purge path now quarantines before it deletes**, in both
+  implementations. A path-based "check then unlink" can never be atomic, and the
+  two back-to-back identity reads that previously stood in for it caught nothing
+  — no work runs between them, so they only detected a write landing in the
+  microseconds that separated them. The file is now renamed out of the way
+  first, which removes the *name*: after that a writer opening by path cannot
+  reach the file at all, and a writer holding an open descriptor is what the
+  existing lock probe already screens for. Emptiness is tested after the rename,
+  and anything that gained content is put back untouched.
+- Content hashing was **removed** from the purge path rather than added to: for
+  a file that was empty, any write makes it non-empty, so the size test already
+  covers every case a content hash would — and on the PowerShell side `zlogIdent`
+  SHA-256s whole files, so this is also two fewer hashes per candidate.
+- The quarantine decision is keyed on the **artifact**, not on `mv`'s exit
+  status. Signalling the process group while the rename is in flight can kill
+  `mv` *after* it has already moved the file; trusting the status there dropped
+  the restore record and orphaned the file as `<name>.purge` debris. Found by a
+  test written to assert exactly that invariant.
+- Quarantined files are tracked separately from temp artifacts and are **renamed
+  back** on any exit path, never deleted: they are not ours to clean up and may
+  hold live data. Conflating the two would turn an interrupt into data loss.
 - `clean` and `deep` now **exit non-zero when any file fails**. Both counted
   failures into the report line but ended on a `du`/`echo` statement, so a run
   where every file errored still exited 0 and any caller gating on the exit
@@ -31,10 +44,17 @@ Fixed:
   `deep-preview`. The prune count was a second full `find ~` traversal purely to
   print a number; the single traversal now emits both record kinds and callers
   distinguish them with `[ -d ]`.
-- `install.sh` no longer destroys a backup when two upgrades land in the same
-  second. `date +%Y%m%d%H%M%S` has one-second granularity, so both computed the
-  same backup name and the unconditional `rm -rf "$BACKUP"` deleted the only
-  good copy. The name now carries `$$` as well.
+- `install.sh` never destroys a backup to make room. `date +%S` has one-second
+  granularity, so two upgrades in the same second computed the same name and the
+  unconditional `rm -rf "$BACKUP"` deleted the only good copy; adding `$$` does
+  not close that either, since separate PID namespaces sharing a home directory
+  can reuse a PID within the same second. The backup container is now allocated
+  with `mktemp -d` — atomic, so nobody else can own the name — and deliberately
+  **kept**: the skill is moved in as a named child (`…bak.XXXXXXXXXX/zlog/`).
+  Releasing the reservation with `rmdir` first would reopen the hole, because
+  anything creating that path in the gap makes `mv` place the skill *inside* it,
+  leaving a reported "backup" that is not one and a rollback that restores from
+  the wrong place.
 - `install.sh` no longer claims "previous version restored" when the rollback
   failed. The `mv "$BACKUP" "$SKILL_DIR" || true` swallowed the failure and the
   message was printed unconditionally, leaving a user with no installed skill
@@ -61,12 +81,6 @@ Tests:
 
 - `tests/test-posix.sh` asserts on `lexists`, not `[ -e ]`, for the
   dangling-symlink cases — `-e` is exactly the test that used to lie.
-- `install.sh` never deletes an existing backup to make room. The backup path
-  is allocated with `mktemp -d` (atomic, so it cannot collide) and the name is
-  then freed for the `mv`; a forward-only counter is the fallback. Previously a
-  same-second collision was "resolved" by `rm -rf "$BACKUP"`, which destroyed
-  the only good copy. Adding `$$` alone was not sufficient: separate PID
-  namespaces sharing a home directory can reuse a PID within the same second.
 - `tests/test-install.sh` asserts the rollback-failure test against the
   **specific** backup path the installer printed. `ls -d "$DEST".bak.* | head -1`
   could match a backup left by an earlier test, so the assertion could pass

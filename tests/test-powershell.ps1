@@ -162,6 +162,28 @@ Check 'failed restore left the pre-existing file' { Test-Path (Join-Path $r 'svc
 Remove-Item (Join-Path $r 'svc.log') -Force -ErrorAction SilentlyContinue
 Remove-Item (Join-Path $r 'svc.log.zst') -Force -ErrorAction SilentlyContinue
 
+Write-Output '--- purge quarantines the name before deleting ---'
+# The rename is the load-bearing part: after it, a writer opening by path cannot
+# reach the file, so the check-then-remove window no longer exists. Assert the
+# observable invariants here; the race-specific regression lives in
+# test-posix.sh, where it can be made deterministic by stalling the rename.
+$PQP = Join-Path $base 'purgeq'
+New-Item -ItemType Directory -Path $PQP -Force | Out-Null
+[IO.File]::WriteAllBytes((Join-Path $PQP 'stillempty.log'), (New-Object byte[] 0))
+[IO.File]::WriteAllText((Join-Path $PQP 'hasbytes.log'), 'LIVE SESSION DATA')
+$oldPq = (Get-Date).AddMinutes(-5)
+(Get-Item -LiteralPath (Join-Path $PQP 'stillempty.log')).LastWriteTime = $oldPq
+(Get-Item -LiteralPath (Join-Path $PQP 'hasbytes.log')).LastWriteTime = $oldPq
+$oldP = $env:ZLOG_TEST_ROOT
+$env:ZLOG_TEST_ROOT = $PQP
+& $Script clean | Out-Null
+$env:ZLOG_TEST_ROOT = $oldP
+Check 'quarantine purges a still-empty file' { -not (Test-Path -LiteralPath (Join-Path $PQP 'stillempty.log')) }
+Check 'quarantine leaves the non-empty file' { Test-Path -LiteralPath (Join-Path $PQP 'hasbytes.log') }
+Check 'its bytes are intact' { [IO.File]::ReadAllText((Join-Path $PQP 'hasbytes.log')) -eq 'LIVE SESSION DATA' }
+Check 'quarantine leaves no .purge debris' { @(Get-ChildItem -LiteralPath $PQP -Filter '*.purge' -Recurse -ErrorAction SilentlyContinue).Count -eq 0 }
+Remove-Item -LiteralPath $PQP -Recurse -Force -ErrorAction SilentlyContinue
+
 Write-Output '--- clean exits non-zero when files fail ---'
 # DoClean used to end on the report line, so a run where every file errored
 # still exited 0 and any caller gating on the exit status read it as success.

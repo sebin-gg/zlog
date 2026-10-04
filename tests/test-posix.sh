@@ -371,7 +371,81 @@ touch_old "$FX/deadc/f.log"
 PATH="$FX/deadc:$PATH" ZLOG_TEST_ROOT="$FX/deadc" bash "$ZLOG_SH" clean > "$FX/deadc.txt" 2>&1; rc=$?
 check "clean reports failed>0" "grep -q 'failed=1' \"$FX/deadc.txt\""
 check "clean exits non-zero when files fail" "[ $rc -ne 0 ]"
-rm -rf "$FX/deadc" "$FX/deadc/f.log"*
+rm -rf "$FX/deadc"
+
+echo "--- purge quarantines the name before deciding ---"
+# The rename is the load-bearing part: after it a writer that opens by path
+# cannot reach the file, so the check-then-unlink window no longer exists. A
+# writer that gets there first must also never lose bytes — the file is put
+# back untouched when it turns out non-empty.
+PQ="$FX/quarantine"; mkdir -p "$PQ"
+# (a) still empty at resolve time -> purged
+: > "$PQ/empty.log"; touch_old "$PQ/empty.log"
+ZLOG_TEST_ROOT="$PQ" bash "$ZLOG_SH" clean > "$FX/pq1.txt" 2>&1
+check "quarantine purges a still-empty file" "[ ! -e \"$PQ/empty.log\" ]"
+check "quarantine leaves no .purge debris" "[ -z \"\$(ls \"$PQ\" | grep 'purge' || true)\" ]"
+check "quarantine reports purged" "grep -q 'purged=1' \"$FX/pq1.txt\""
+# (b) gains content before resolve -> put back, byte-for-byte
+: > "$PQ/grew.log"; touch_old "$PQ/grew.log"
+python3 -c "open('$PQ/grew.log','a').write('LIVE SESSION DATA\n')" &
+wait
+ZLOG_TEST_ROOT="$PQ" bash "$ZLOG_SH" clean > "$FX/pq2.txt" 2>&1
+check "non-empty file survives the purge" "[ -f \"$PQ/grew.log\" ]"
+check "its bytes are intact" "grep -q 'LIVE SESSION DATA' \"$PQ/grew.log\""
+check "no .purge debris after skip" "[ -z \"\$(ls \"$PQ\" | grep 'purge' || true)\" ]"
+rm -rf "$PQ"
+
+echo "--- quarantine is never orphaned by an interrupt ---"
+# The rename and the unlink are separate steps, so a signal can land between
+# them. The invariant that must hold afterwards: a file that was mid-quarantine
+# is either resolved (purged, because it was still empty) or put back — never
+# left behind as <name>.purge debris with no record of where it came from.
+# This also guards the artifact-vs-exit-status rule: if the rename succeeded but
+# mv was then killed, the non-zero status must not be read as "nothing moved".
+QI="$FX/qint"; mkdir -p "$QI"
+: > "$QI/victim.log"; touch_old "$QI/victim.log"
+if command -v setsid >/dev/null 2>&1; then
+  mkdir -p "$FX/qbin"
+  cat > "$FX/qbin/mv" <<'MVEOF'
+#!/bin/bash
+# Perform the real rename, then stall when the destination is a quarantine
+# target, so the signal lands while the file is quarantined.
+src=""; dst=""
+for a in "$@"; do
+  case "$a" in
+    -n) ;;
+    *) if [ -z "$src" ]; then src="$a"; elif [ -z "$dst" ]; then dst="$a"; fi ;;
+  esac
+done
+/bin/mv -n "$src" "$dst" 2>/dev/null || exit 1
+case "$dst" in *.purge) sleep 3 ;; esac
+exit 0
+MVEOF
+  chmod +x "$FX/qbin/mv"
+  cat > "$FX/run_qint.sh" <<RUNNER
+#!/bin/bash
+echo \$\$ > "$QI/pg.pid"
+exec env PATH="$FX/qbin:\$PATH" ZLOG_TEST_ROOT="$QI" bash "$ZLOG_SH" clean
+RUNNER
+  chmod +x "$FX/run_qint.sh"
+  setsid bash "$FX/run_qint.sh" >/dev/null 2>&1 &
+  i=0
+  while [ ! -s "$QI/pg.pid" ] && [ "$i" -lt 60 ]; do sleep 0.1; i=$((i + 1)); done
+  # wait until the file is genuinely quarantined
+  i=0
+  while [ -z "$(ls "$QI" 2>/dev/null | grep 'purge' || true)" ] && [ "$i" -lt 60 ]; do sleep 0.1; i=$((i + 1)); done
+  check "test reached the quarantined state" "[ -n \"\$(ls \"$QI\" | grep 'purge' || true)\" ]"
+  pgid=$(cat "$QI/pg.pid" 2>/dev/null || echo "")
+  [ -n "$pgid" ] && kill -TERM -- "-$pgid" 2>/dev/null
+  i=0
+  while [ -n "$(ls "$QI" 2>/dev/null | grep 'purge' || true)" ] && [ "$i" -lt 60 ]; do sleep 0.1; i=$((i + 1)); done
+  [ -n "$pgid" ] && kill -9 -- "-$pgid" 2>/dev/null
+  check "interrupt leaves no orphaned .purge debris" "[ -z \"\$(ls \"$QI\" | grep 'purge' || true)\" ]"
+  rm -rf "$FX/qbin" "$FX/run_qint.sh"
+else
+  echo "SKIP: quarantine interrupt (no setsid)"
+fi
+rm -rf "$QI"
 
 echo "--- tmp artifacts cleaned up on interrupt ---"
 # Temp files live next to their source and exist for as long as the compressor

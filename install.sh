@@ -77,26 +77,29 @@ for SKILL_DIR in "${SKILL_DIRS[@]}"; do
     exit 1
   fi
   if [ -d "$SKILL_DIR" ]; then
-    # Allocate a backup path that is guaranteed not to exist, and never delete an
-    # existing backup to make room. `date +%S` alone collides between two
-    # installs in the same second, and adding $$ is not enough either: separate
-    # PID namespaces sharing a home directory can reuse a PID within the same
-    # second. Deleting to make room is the real hazard — it destroys the only
-    # good copy before the replacement exists.
+    # Allocate a backup path that cannot be raced, and never delete an existing
+    # backup to make room. `date +%S` alone collides between two installs in the
+    # same second, and $$ does not fix that either: separate PID namespaces
+    # sharing a home directory can reuse a PID within the same second.
     #
-    # `mktemp -d` creates the name atomically (so it cannot collide), then rmdir
-    # frees it for the mv. Falls back to a counter that only ever moves forward.
-    BACKUP="$(mktemp -d "$SKILL_DIR.bak.XXXXXXXXXX" 2>/dev/null || true)"
-    if [ -n "$BACKUP" ] && rmdir "$BACKUP" 2>/dev/null; then
-      :
-    else
-      BACKUP=""
-      i=0
-      while [ -z "$BACKUP" ]; do
-        cand="$SKILL_DIR.bak.$(date +%Y%m%d%H%M%S).$$.$i"
-        if [ ! -e "$cand" ]; then BACKUP="$cand"; fi
-        i=$((i + 1))
-      done
+    # `mktemp -d` reserves the container ATOMICALLY, so nobody else can own that
+    # name. The container is then kept — not released — and the skill is moved in
+    # as a named child of it. That matters: if we rmdir'd the container first,
+    # anything creating that path in the gap would make `mv` place the skill
+    # *inside* it, leaving the installer reporting a backup that is not one and
+    # a rollback that restores from the wrong place. Because the container is
+    # empty and ours, "$CONTAINER/zlog" cannot pre-exist, so mv cannot nest.
+    CONTAINER="$(mktemp -d "$SKILL_DIR.bak.XXXXXXXXXX" 2>/dev/null || true)"
+    if [ -z "$CONTAINER" ] || [ ! -d "$CONTAINER" ]; then
+      rm -rf "$STAGE"
+      echo "Error: cannot allocate a backup directory for $SKILL_DIR" >&2
+      exit 1
+    fi
+    BACKUP="$CONTAINER/$(basename "$SKILL_DIR")"
+    if [ -e "$BACKUP" ] || [ -L "$BACKUP" ]; then
+      rm -rf "$STAGE"
+      echo "Error: backup destination $BACKUP is unexpectedly occupied" >&2
+      exit 1
     fi
     mv "$SKILL_DIR" "$BACKUP" || { rm -rf "$STAGE"; echo "Error: cannot back up $SKILL_DIR" >&2; exit 1; }
     if mv "$STAGE" "$SKILL_DIR"; then

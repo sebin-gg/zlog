@@ -83,21 +83,50 @@ function DoClean() {
   $roots = 0
   foreach ($r in $zlogPaths) { if (Test-Path $r) { $roots++ } }
   # purge empties through the same predicate + lock check
-  zlogCandidates 0 $true | ForEach-Object {
-    if (-not (zlogFree $_.FullName)) { $locked++; return }
-    # Mirror the identity re-checks the compression path already makes. The
-    # candidate snapshot decided this file was empty, but a writer may have
-    # appended since, and `zlogFree` is not a guarantee — an exclusive-open
-    # probe only catches a writer that happens to hold the file open at probe
-    # time, not one that opened, wrote and closed. Re-read identity and
-    # emptiness immediately before the destructive step and skip on any change.
-    $pPre = zlogIdent $_.FullName
-    if (-not $pPre) { $failed++; return }
-    $pCur = zlogIdent $_.FullName
-    $pLen = -1
-    try { $pLen = (Get-Item -LiteralPath $_.FullName -ErrorAction Stop).Length } catch { $pLen = -1 }
-    if ((-not $pCur) -or ($pCur -ne $pPre) -or ($pLen -ne 0)) { $skipped++; return }
-    try { Remove-Item -LiteralPath $_.FullName -Force -ErrorAction Stop; $purged++ } catch { $failed++ }
+  # Quarantine-then-verify. A path-based check followed by Remove-Item can never
+  # be atomic, and two back-to-back zlogIdent reads close nothing: no work runs
+  # between them. Renaming first removes the name, so a writer that opens by
+  # path cannot reach the file, and on Windows an open handle blocks the move
+  # outright. Only then test emptiness, and put the file back if it gained
+  # content. No content hash is needed here: for a file that was empty, any
+  # write makes it non-empty, and zlogIdent SHA-256s entire files.
+  $script:zlogQuarantine = @{}
+  try {
+    zlogCandidates 0 $true | ForEach-Object {
+      if (-not (zlogFree $_.FullName)) { $locked++; return }
+      $src = $_.FullName
+      $q = "$src.$PID.purge"
+      $script:zlogQuarantine[$q] = $src
+      # Key the decision on the ARTIFACT, not on whether the call threw.
+      # -PathType Leaf, not bare Test-Path: a directory at the quarantine path
+      # would satisfy a bare test and be mistaken for a successful rename.
+      try { [System.IO.File]::Move($src, $q) } catch { }
+      if (-not (Test-Path -LiteralPath $q -PathType Leaf)) {
+        $script:zlogQuarantine.Remove($q); $failed++; return
+      }
+      $qLen = -1
+      try { $qLen = (Get-Item -LiteralPath $q -ErrorAction Stop).Length } catch { $qLen = -1 }
+      if ($qLen -eq 0) {
+        try { Remove-Item -LiteralPath $q -Force -ErrorAction Stop; $purged++ } catch { $failed++ }
+      }
+      else {
+        # gained content since the scan: put it back untouched
+        try { [System.IO.File]::Move($q, $src) } catch { }
+        $skipped++
+      }
+      $script:zlogQuarantine.Remove($q)
+    }
+  }
+  finally {
+    # Restore, never delete. A quarantined file is not ours to clean up — it may
+    # hold live data — so an abort has to put it back.
+    foreach ($q in @($script:zlogQuarantine.Keys)) {
+      $s = $script:zlogQuarantine[$q]
+      if ((Test-Path -LiteralPath $q) -and -not (Test-Path -LiteralPath $s)) {
+        try { [System.IO.File]::Move($q, $s) } catch { }
+      }
+    }
+    $script:zlogQuarantine.Clear()
   }
   zlogCandidates 10 $false | ForEach-Object {
     $cands++
