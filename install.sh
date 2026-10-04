@@ -77,13 +77,27 @@ for SKILL_DIR in "${SKILL_DIRS[@]}"; do
     exit 1
   fi
   if [ -d "$SKILL_DIR" ]; then
-    # `date +%S` has one-second granularity, so two installs inside the same
-    # second produced the same name and the old unconditional `rm -rf "$BACKUP"`
-    # destroyed the only good copy before the new one existed. Add $$ for
-    # per-process uniqueness and keep the rm, which now can only ever hit a
-    # name this process just computed.
-    BACKUP="$SKILL_DIR.bak.$(date +%Y%m%d%H%M%S).$$"
-    rm -rf "$BACKUP"
+    # Allocate a backup path that is guaranteed not to exist, and never delete an
+    # existing backup to make room. `date +%S` alone collides between two
+    # installs in the same second, and adding $$ is not enough either: separate
+    # PID namespaces sharing a home directory can reuse a PID within the same
+    # second. Deleting to make room is the real hazard — it destroys the only
+    # good copy before the replacement exists.
+    #
+    # `mktemp -d` creates the name atomically (so it cannot collide), then rmdir
+    # frees it for the mv. Falls back to a counter that only ever moves forward.
+    BACKUP="$(mktemp -d "$SKILL_DIR.bak.XXXXXXXXXX" 2>/dev/null || true)"
+    if [ -n "$BACKUP" ] && rmdir "$BACKUP" 2>/dev/null; then
+      :
+    else
+      BACKUP=""
+      i=0
+      while [ -z "$BACKUP" ]; do
+        cand="$SKILL_DIR.bak.$(date +%Y%m%d%H%M%S).$$.$i"
+        if [ ! -e "$cand" ]; then BACKUP="$cand"; fi
+        i=$((i + 1))
+      done
+    fi
     mv "$SKILL_DIR" "$BACKUP" || { rm -rf "$STAGE"; echo "Error: cannot back up $SKILL_DIR" >&2; exit 1; }
     if mv "$STAGE" "$SKILL_DIR"; then
       echo "✓ installed to $SKILL_DIR/ (previous skill backed up to $BACKUP/)"

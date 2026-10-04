@@ -180,24 +180,24 @@ with tarfile.open(root + '/mismatch.log.tar.gz', 'w:gz') as t:
     ti = tarfile.TarInfo('wrongname.log'); data = b'evil'
     ti.size = len(data); t.addfile(ti, io.BytesIO(data))
 EOF
-check "traversal refused" "! bash \"$ZLOG_SH\" restore \"\"$ZLOG_TEST_ROOT\"/trav.log.tar.gz\""
+check "traversal refused" "! bash \"$ZLOG_SH\" restore \"$ZLOG_TEST_ROOT/trav.log.tar.gz\""
 check "traversal no escape" "[ ! -e \"$ZLOG_TEST_ROOT\"/escape.log ] && [ ! -e \"$FX\"/escape.log ] && [ ! -e \"$ZLOG_TEST_ROOT\"/../escape.log ]"
 check "traversal no output" "[ ! -e \"$ZLOG_TEST_ROOT\"/trav.log ]"
-check "mismatch refused" "! bash \"$ZLOG_SH\" restore \"\"$ZLOG_TEST_ROOT\"/mismatch.log.tar.gz\""
+check "mismatch refused" "! bash \"$ZLOG_SH\" restore \"$ZLOG_TEST_ROOT/mismatch.log.tar.gz\""
 check "mismatch no output" "[ ! -e \"$ZLOG_TEST_ROOT\"/mismatch.log ]"
 check "malicious archives kept" "[ -f \"$ZLOG_TEST_ROOT\"/trav.log.tar.gz ] && [ -f \"$ZLOG_TEST_ROOT\"/mismatch.log.tar.gz ]"
 rm -f "$ZLOG_TEST_ROOT/trav.log.tar.gz" "$ZLOG_TEST_ROOT/mismatch.log.tar.gz"
 
 echo "--- corrupt archive restore ---"
 head -c 100 /dev/urandom > "$ZLOG_TEST_ROOT/corrupt.log.zst"
-check "corrupt refused" "! bash \"$ZLOG_SH\" restore \"\"$ZLOG_TEST_ROOT\"/corrupt.log.zst\""
+check "corrupt refused" "! bash \"$ZLOG_SH\" restore \"$ZLOG_TEST_ROOT/corrupt.log.zst\""
 check "corrupt no output" "[ ! -e \"$ZLOG_TEST_ROOT\"/corrupt.log ]"
 check "corrupt archive kept" "[ -f \"$ZLOG_TEST_ROOT\"/corrupt.log.zst ]"
 rm -f "$ZLOG_TEST_ROOT/corrupt.log.zst"
 
 echo "--- corrupt stream restore leaves no partial output ---"
 head -c 100 /dev/urandom > "$ZLOG_TEST_ROOT/corrupt2.log.gz"
-check "corrupt gz refused" "! bash \"$ZLOG_SH\" restore \"\"$ZLOG_TEST_ROOT\"/corrupt2.log.gz\""
+check "corrupt gz refused" "! bash \"$ZLOG_SH\" restore \"$ZLOG_TEST_ROOT/corrupt2.log.gz\""
 check "corrupt gz no output" "[ ! -e \"$ZLOG_TEST_ROOT\"/corrupt2.log ]"
 check "corrupt gz no tmp leftovers" "[ -z \"\$(ls \"$ZLOG_TEST_ROOT\"/ | grep 'tmp\\.restore' || true)\" ]"
 check "corrupt gz archive kept" "[ -f \"$ZLOG_TEST_ROOT\"/corrupt2.log.gz ]"
@@ -231,7 +231,7 @@ name.log"
 python3 -c "open('$ZLOG_TEST_ROOT/nl\nname.log','w').write('compressible log line\n'*2000)"
 touch_old "$NLFILE"
 bash "$ZLOG_SH" clean > "$FX/clean5.txt"; cat "$FX/clean5.txt"
-check "newline archived" "[ ! -e \"\$NLFILE\" ] && (ls \"\"$ZLOG_TEST_ROOT\"\" | grep -q 'nl')"
+check "newline archived" "[ ! -e \"\$NLFILE\" ] && (ls \"\$ZLOG_TEST_ROOT\" | grep -q 'nl')"
 check "newline no tmp leftovers" "[ -z \"\$(ls \"$ZLOG_TEST_ROOT\"/ | grep 'tmp\\.' || true)\" ]"
 
 echo "--- leading-dash filename (never lost, whatever tar decides) ---"

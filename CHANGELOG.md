@@ -61,6 +61,22 @@ Tests:
 
 - `tests/test-posix.sh` asserts on `lexists`, not `[ -e ]`, for the
   dangling-symlink cases — `-e` is exactly the test that used to lie.
+- `install.sh` never deletes an existing backup to make room. The backup path
+  is allocated with `mktemp -d` (atomic, so it cannot collide) and the name is
+  then freed for the `mv`; a forward-only counter is the fallback. Previously a
+  same-second collision was "resolved" by `rm -rf "$BACKUP"`, which destroyed
+  the only good copy. Adding `$$` alone was not sufficient: separate PID
+  namespaces sharing a home directory can reuse a PID within the same second.
+- `tests/test-install.sh` asserts the rollback-failure test against the
+  **specific** backup path the installer printed. `ls -d "$DEST".bak.* | head -1`
+  could match a backup left by an earlier test, so the assertion could pass
+  without the one under test existing at all.
+- `tests/test-posix.sh` no longer contains doubled `""` inside `eval`'d strings.
+  A mechanical rewrite had produced `\"\"$ZLOG_TEST_ROOT\"/x\"`, which bash reads
+  as `""` followed by an *unquoted* path — so the traversal/mismatch/corrupt
+  restore checks passed for the wrong reason and `newline archived` failed
+  outright whenever the fixture path contained a space. Verified by running the
+  whole suite under a `TMPDIR` containing a space.
 - `tests/test-posix.sh` quotes every variable that reaches `check`'s `eval`.
   The "deep-preview changes nothing" checks passed `$HOME` unquoted, so they
   word-split and silently **failed** (not skipped) on any path containing a

@@ -147,7 +147,13 @@ else
   check "does not falsely claim rollback succeeded" "! grep -q 'previous version restored' \"$FX/i8.txt\""
   check "says the rollback also failed" "grep -qi 'rollback also failed' \"$FX/i8.txt\""
   check "names the recoverable backup" "grep -q 'still at:' \"$FX/i8.txt\""
-  check "previous version still recoverable on disk" "[ -n \"\$(ls -d \"$DEST\".bak.* 2>/dev/null | head -n 1)\" ]"
+  # Assert on the SPECIFIC backup the installer named, not `ls -d *.bak.* |
+  # head -1` — earlier tests already left backups behind, so the old form could
+  # pass by picking up one of those instead of the one this install created.
+  DEADBAK=$(sed -n 's/^.*still at: //p' "$FX/i8.txt" | head -n 1)
+  check "reported backup path is non-empty" "[ -n \"$DEADBAK\" ]"
+  check "reported backup exists on disk" "[ -d \"$DEADBAK\" ]"
+  check "reported backup holds the previous skill" "[ -s \"$DEADBAK/SKILL.md\" ] && cmp -s \"$DEADBAK/SKILL.md\" \"$FX/pre-deadmv.bak\""
 fi
 # Put a working skill back so the exit trap's tree is coherent.
 rm -rf "$DEST"; mkdir -p "$DEST"
