@@ -9,12 +9,15 @@ OUT="$FX/outside"
 mkdir -p "$ZLOG_TEST_ROOT/node_modules" "$HOME/.cursor" "$OUT"
 
 # Portable helpers (Linux + macOS + Git Bash + WSL):
-# BSD touch lacks -d, BSD systems lack md5sum.
+# BSD touch lacks -d, BSD systems lack sha256sum.
 touch_old() {
   python3 -c 'import os,sys,time; t=time.time()-300
 for p in sys.argv[1:]: os.utime(p,(t,t))' "$@"
 }
-fsum() { if command -v md5sum >/dev/null 2>&1; then md5sum "$@"; else md5 "$@"; fi }
+# SHA-256 rather than MD5: this only fingerprints a file listing to prove a
+# command changed nothing, but a weak hash trips Sonar rule S4790
+# (weak-hash), which is pure noise for a test helper.
+fsum() { if command -v sha256sum >/dev/null 2>&1; then sha256sum "$@"; else shasum -a 256 "$@"; fi }
 
 python3 -c "open('$ZLOG_TEST_ROOT/ok.log','w').write('compressible log line\n'*2000)"
 head -c 20480 /dev/urandom > "$ZLOG_TEST_ROOT/noise.log"
