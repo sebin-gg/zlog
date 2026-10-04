@@ -110,14 +110,22 @@ for SKILL_DIR in "${SKILL_DIRS[@]}"; do
       # `... || true` printed "previous version restored" unconditionally, so a
       # failed restore left the user with NO installed skill while the message
       # said otherwise. On failure, name the backup so it is recoverable.
+      #
       # Never move INTO an occupied destination: if another installer created
       # $SKILL_DIR in the gap, plain `mv "$BACKUP" "$SKILL_DIR"` would succeed
-      # by nesting the backup as $SKILL_DIR/<basename> and still exit 0, so the
-      # next line would claim a restore that never happened. Refuse the move
-      # and report the backup path instead. The artifact check after the move
-      # covers the residual race (occupied between our check and the mv): a
-      # nested move leaves $SKILL_DIR/<basename> behind, which a real restore
-      # never produces.
+      # by nesting the backup as $SKILL_DIR/<basename> and still exit 0, so a
+      # bare status check would claim a restore that never happened. Refuse the
+      # move when the destination is occupied and report the backup path.
+      #
+      # Fingerprint the backup directory BEFORE the move, so a same-named child
+      # found afterward can be told apart from our own backup. The previous
+      # installation may legitimately contain a top-level child also named
+      # `zlog` (this installer never creates one, but a user can); device+inode
+      # says whether that child IS the moved backup — nested by a concurrent
+      # occupant winning the residual race between the check and the mv — or
+      # just rode along inside it. Same portable `stat` fallback zlog.sh uses
+      # (GNU -c, BSD -f).
+      BACKUP_ID="$(stat -c '%d %i' "$BACKUP" 2>/dev/null || stat -f '%d %i' "$BACKUP" 2>/dev/null || true)"
       if [ -e "$SKILL_DIR" ] || [ -L "$SKILL_DIR" ]; then
         echo "Error: install to $SKILL_DIR failed AND the rollback was skipped:" >&2
         echo "       $SKILL_DIR is now occupied (possibly by another installer)," >&2
@@ -125,19 +133,30 @@ for SKILL_DIR in "${SKILL_DIRS[@]}"; do
         echo "       The previous version is still at: $BACKUP" >&2
       elif mv "$BACKUP" "$SKILL_DIR" 2>/dev/null \
         && [ -d "$SKILL_DIR" ] \
-        && [ ! -e "$BACKUP" ] && [ ! -L "$BACKUP" ] \
-        && [ ! -e "$SKILL_DIR/$(basename "$SKILL_DIR")" ]; then
-        echo "Error: install to $SKILL_DIR failed, previous version restored" >&2
-      else
-        if [ -e "$SKILL_DIR/$(basename "$SKILL_DIR")" ] || [ -L "$SKILL_DIR/$(basename "$SKILL_DIR")" ]; then
+        && [ ! -e "$BACKUP" ] && [ ! -L "$BACKUP" ]; then
+        NESTED="$SKILL_DIR/$(basename "$SKILL_DIR")"
+        NESTED_ID="$(stat -c '%d %i' "$NESTED" 2>/dev/null || stat -f '%d %i' "$NESTED" 2>/dev/null || true)"
+        if { [ -e "$NESTED" ] || [ -L "$NESTED" ]; } \
+          && [ -n "$BACKUP_ID" ] && [ "$NESTED_ID" = "$BACKUP_ID" ]; then
           echo "Error: install to $SKILL_DIR failed AND the rollback nested the backup" >&2
           echo "       inside the occupying directory instead of restoring it." >&2
-          echo "       The previous version is still at: $SKILL_DIR/$(basename "$SKILL_DIR")" >&2
+          echo "       The previous version is still at: $NESTED" >&2
         else
+          echo "Error: install to $SKILL_DIR failed, previous version restored" >&2
+          if [ -e "$NESTED" ] || [ -L "$NESTED" ]; then
+            echo "       Note: $NESTED pre-existed inside the previous installation" >&2
+            echo "       and was restored with it; it is not rollback debris." >&2
+          fi
+        fi
+      else
+        if [ -e "$BACKUP" ] || [ -L "$BACKUP" ]; then
           echo "Error: install to $SKILL_DIR failed AND the rollback also failed." >&2
           echo "       The previous version is still at: $BACKUP" >&2
           echo "       Restore it manually with:" >&2
           echo "         mv \"$BACKUP\" \"$SKILL_DIR\"" >&2
+        else
+          echo "Error: install to $SKILL_DIR failed and the backup is no longer at $BACKUP;" >&2
+          echo "       inspect $SKILL_DIR before retrying." >&2
         fi
       fi
       exit 1

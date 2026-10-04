@@ -37,6 +37,31 @@ Fixed:
   record and counted it as "skipped" — orphaning the data while still exiting 0.
   Both implementations now verify the move-back by artifact, keep the record so
   the exit path retries, print where the data is, and count it as a failure.
+- A **failed quarantine delete is reported instead of swallowed**, in both
+  implementations. The purge counted the failure but dropped the restore record
+  and named no path — leaving the data at `<name>.purge` with the original name
+  absent. The record is now kept so the exit path moves it back, the warning
+  names the quarantine path, and the run fails. (On the PowerShell side the
+  record-keeping fix from the previous round had left an unconditional `Remove`
+  that contradicted it; purge branches now manage the record explicitly.)
+- The shell exit trap's quarantine-restore loop **never ran**. `for i in
+  ${!ZLOG_QSRC[@]+"${!ZLOG_QSRC[@]}"}` parses the `!` as indirect expansion
+  over the values, so any live record list aborts with "invalid variable name"
+  and the body is skipped. Every earlier test passed because no record ever
+  survived to `EXIT` — each path dropped it first. Now that failure paths keep
+  the record, the loop is a plain index loop using the same `${#...}` length
+  form `zlog_quarantine_drop` already uses (safe under `set -u` back to bash
+  3.2). Found because a new test finally left a record at exit and watched the
+  trap fumble it; the fix was verified by reverting the loop alone and watching
+  that test fail.
+- `install.sh` distinguishes a **nested backup from a pre-existing same-named
+  child** by device+inode. Refusing the rollback into an occupied destination
+  is not enough: the previous installation may itself contain a top-level
+  `zlog` child, and name-matching alone would misreport a successful restore as
+  a nesting (or another process's directory as the backup). The backup is
+  fingerprinted before the move; only a same-identity child is reported as the
+  nested backup, a rode-along child is restored with a note, and a surviving
+  `BACKUP` is always reported first.
 - `clean` and `deep` now **exit non-zero when any file fails**. Both counted
   failures into the report line but ended on a `du`/`echo` statement, so a run
   where every file errored still exited 0 and any caller gating on the exit
@@ -111,6 +136,10 @@ Tests:
   refuses the move (no `$DEST/zlog` nesting), leaves the occupant untouched, and
   names the surviving backup. Verified the scenario nests and falsely claims
   "previous version restored" against the pre-fix installer.
+- `tests/test-install.sh` covers a rollback where the previous installation
+  already contains a same-named `zlog` child. It asserts the successful rollback
+  is still reported as restored (not as a nesting) and the child rides along.
+  Fails against the name-matching check, which cried nesting.
 - `tests/test-install.sh` checks that each backup retains **its own** version.
   Counting backups that merely contained `MARKER-` still passed if both held
   the same marked copy and the other version had been lost.
@@ -118,6 +147,12 @@ Tests:
   that appends **after** the rename. The previous version appended before `clean`
   even started, so `find -empty` never selected the file and the restore branch
   never ran — the test passed even with that branch broken.
+- `tests/test-posix.sh` covers a quarantine **delete that fails** with a stubbed
+  `rm` refusing `*.purge` targets. It asserts the failure is counted, the
+  quarantine path is named, the exit is non-zero, and the exit trap puts the
+  file back with no debris. The last two assertions fail against both the old
+  drop-the-record code and against the fixed delete with the old (dead)
+  restore loop — so the one test pins both fixes.
 - `tests/test-posix.sh` no longer contains doubled `""` inside `eval`'d strings.
   A mechanical rewrite had produced `\"\"$ZLOG_TEST_ROOT\"/x\"`, which bash reads
   as `""` followed by an *unquoted* path — so the traversal/mismatch/corrupt

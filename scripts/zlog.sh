@@ -35,14 +35,20 @@ zlog_quarantine_drop() {
   return 0
 }
 zlog_restore_quarantine() {
-  local i
-  for i in ${!ZLOG_QSRC[@]+"${!ZLOG_QSRC[@]}"}; do
-    [ -n "${ZLOG_QSRC[$i]:-}" ] || continue
-    # Only move back if the quarantined file still exists and the original name
-    # is still free; `mv -n` never overwrites either way.
-    if [ -e "${ZLOG_QSRC[$i]}" ] && [ ! -e "${ZLOG_QDST[$i]}" ]; then
+  # Index loop, not `for i in ${!ZLOG_QSRC[@]+"${!ZLOG_QSRC[@]}"}`: under that
+  # grouping bash parses the `!` as indirect expansion over the VALUES, so any
+  # non-empty record list aborts with "invalid variable name" and nothing is
+  # ever restored. The `${#...}` length form matches zlog_quarantine_drop and
+  # is safe under `set -u` back to bash 3.2 (macOS).
+  local i n
+  n=${#ZLOG_QSRC[@]}
+  i=0
+  while [ "$i" -lt "$n" ]; do
+    if [ -n "${ZLOG_QSRC[$i]:-}" ] && [ -e "${ZLOG_QSRC[$i]}" ] \
+      && [ ! -e "${ZLOG_QDST[$i]:-}" ]; then
       mv -n "${ZLOG_QSRC[$i]}" "${ZLOG_QDST[$i]}" 2>/dev/null || true
     fi
+    i=$((i + 1))
   done
   return 0
 }
@@ -315,10 +321,16 @@ zlog_purge_empty() {
     echo "[zlog] WARNING: could not restore quarantined file to $src; it remains at $q" >&2
     return 2
   fi
-  local rc=0
-  rm -f "$q" 2>/dev/null || rc=2
-  zlog_quarantine_drop
-  return $rc
+  # Deletion itself can fail (read-only directory, ACL). Drop the restore
+  # record only on success: if $q still holds the file while $src is absent,
+  # the exit trap must still be able to move it back. Report where the data is
+  # either way — a bare non-zero return names nothing.
+  if rm -f "$q" 2>/dev/null; then
+    zlog_quarantine_drop
+    return 0
+  fi
+  echo "[zlog] WARNING: could not delete quarantined file $q (original $src absent); it remains at $q" >&2
+  return 2
 }
 
 do_clean() {

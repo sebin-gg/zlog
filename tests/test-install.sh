@@ -219,9 +219,30 @@ else
   check "reported backup exists on disk" "[ -d \"$RACEBAK\" ]"
   check "reported backup holds the previous skill" "[ -s \"$RACEBAK/SKILL.md\" ] && cmp -s \"$RACEBAK/SKILL.md\" \"$FX/pre-race.bak\""
 fi
-# Put a working skill back so the exit trap's tree is coherent.
+# Put a working skill back so the next test starts from a live install.
 rm -rf "$DEST"; mkdir -p "$DEST"
 ZLOG_REPO_RAW="file://$FX/repo" bash "$REPO/install.sh" > "$FX/i11.txt" 2>&1 || true
+
+echo "--- rollback with a pre-existing same-named child still reports restore ---"
+# The previous installation may contain a top-level child also named `zlog`.
+# That child rode along inside the backup; device+inode says it is NOT the
+# moved backup itself, so a successful rollback must still be reported as a
+# restore — not as a nesting. (The race test above covers the other quadrant:
+# a same-inode child left by a concurrent occupant.)
+printf 'pre-existing child\n' > "$DEST/$SKILL_NAME"
+cp "$DEST/SKILL.md" "$FX/pre-child.bak"
+if PATH="$FX/partialmv:$PATH" ZLOG_REPO_RAW="file://$FX/repo" bash "$REPO/install.sh" > "$FX/i12.txt" 2>&1; then
+  echo "FAIL: install succeeded despite failing promote"; fail=1
+else
+  echo "PASS: install failed as expected"
+  check "successful rollback is still reported as restored" "grep -q 'previous version restored' \"$FX/i12.txt\""
+  check "rollback is not misreported as nesting" "! grep -qi 'nested' \"$FX/i12.txt\""
+  check "pre-existing child was restored with the skill" "grep -q 'pre-existing child' \"$DEST/$SKILL_NAME\""
+  check "live skill restored" "[ -d \"$DEST\" ] && cmp -s \"$DEST/SKILL.md\" \"$FX/pre-child.bak\""
+fi
+# Put a working skill back so the exit trap's tree is coherent.
+rm -rf "$DEST"; mkdir -p "$DEST"
+ZLOG_REPO_RAW="file://$FX/repo" bash "$REPO/install.sh" > "$FX/i13.txt" 2>&1 || true
 
 if [ "$fail" -eq 0 ]; then echo "INSTALL TESTS ALL PASS"; else echo "INSTALL TESTS FAILED"; fi
 exit $fail

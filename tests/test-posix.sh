@@ -453,6 +453,32 @@ check "unrestorable file is still on disk under its quarantine name" "[ -n \"$bl
 check "its data is intact, not deleted" "[ -s \"$blocked_purge\" ] && grep -q 'LIVE SESSION DATA' \"$blocked_purge\""
 check "unrestorable file makes clean exit non-zero" "[ $blocked_rc -ne 0 ]"
 rm -f "$PQ"/blocked.log.*.purge
+# (d) the quarantine DELETE fails. `rm` is stubbed to refuse *.purge targets,
+# so the file still holds... nothing was written to it, but the original name
+# is absent and the data sits at the quarantine path. The record must be KEPT
+# so the exit trap moves it back — not dropped (which would orphan it as debris
+# while still counting only a bare failure with no path).
+mkdir -p "$FX/rbin"
+cat > "$FX/rbin/rm" <<'MVEOF'
+#!/bin/bash
+for a in "$@"; do
+  case "$a" in
+    -*) ;;
+    *.purge) exit 1 ;;
+  esac
+done
+if [ -x /bin/rm ]; then exec /bin/rm "$@"; else exec /usr/bin/rm "$@"; fi
+MVEOF
+chmod +x "$FX/rbin/rm"
+: > "$PQ/stuck.log"; touch_old "$PQ/stuck.log"
+PATH="$FX/rbin:$PATH" ZLOG_TEST_ROOT="$PQ" bash "$ZLOG_SH" clean > "$FX/pq4.txt" 2>&1
+stuck_rc=$?
+rm -rf "$FX/rbin"
+check "un-deletable file is counted as failed, not purged" "grep -qE 'failed=[1-9]' \"$FX/pq4.txt\""
+check "un-deletable file is reported with its quarantine path" "grep -q 'could not delete quarantined file' \"$FX/pq4.txt\""
+check "un-deletable file is put back at its original name" "[ -f \"$PQ/stuck.log\" ]"
+check "no .purge debris after failed delete" "[ -z \"\$(ls \"$PQ\" | grep 'purge' || true)\" ]"
+check "un-deletable file makes clean exit non-zero" "[ $stuck_rc -ne 0 ]"
 rm -rf "$PQ"
 
 echo "--- quarantine is never orphaned by an interrupt ---"

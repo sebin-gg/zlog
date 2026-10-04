@@ -107,8 +107,18 @@ function DoClean() {
       $qLen = -1
       try { $qLen = (Get-Item -LiteralPath $q -ErrorAction Stop).Length } catch { $qLen = -1 }
       if ($qLen -eq 0) {
-        try { Remove-Item -LiteralPath $q -Force -ErrorAction Stop; $purged++ } catch { $failed++ }
-        $script:zlogQuarantine.Remove($q)
+        # Deletion itself can fail (locked, read-only). Drop the restore record
+        # only on success: if $q still holds the file while $src is absent, the
+        # finally block must still be able to move it back. Report where the
+        # data is either way — a bare failed++ names nothing.
+        try {
+          Remove-Item -LiteralPath $q -Force -ErrorAction Stop
+          $purged++
+          $script:zlogQuarantine.Remove($q)
+        } catch {
+          Write-Output "[zlog] WARNING: could not delete quarantined file $q (original $src absent); it remains at $q"
+          $failed++
+        }
       }
       else {
         # Gained content since the scan: put it back untouched. File.Move fails if
