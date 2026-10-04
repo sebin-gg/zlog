@@ -4,6 +4,128 @@
 
 Fixed:
 
+- `restore` no longer deletes a pre-existing **dangling symlink** sitting at the
+  destination. The guard used `[ -e ]`, which follows symlinks and is therefore
+  false for a symlink whose target is missing, so the restore proceeded and the
+  failure path's `rm -f "$out"` destroyed a file zlog never created — while
+  printing "nothing written". The guard now also tests `[ -L ]`, and the
+  cleanup only runs when this invocation actually published the destination.
+- The empty-file **purge path no longer has a TOCTOU window**. `find -empty`
+  decided a file was empty, then a bare `rm -f` deleted it with no identity
+  re-check, so a process that appended in between lost its data — and the run
+  was reported as `purged=1 failed=0`, making the loss invisible. The purge
+  loop now re-reads the inode/size/mtime and re-tests emptiness immediately
+  before deleting, mirroring the two checks the compression path already made.
+  `lsof`/`fuser` is not a substitute: it misses a writer that opened, wrote and
+  closed inside the window.
+- `clean` and `deep` now **exit non-zero when any file fails**. Both counted
+  failures into the report line but ended on a `du`/`echo` statement, so a run
+  where every file errored still exited 0 and any caller gating on the exit
+  status read total failure as success.
+- `zlog.sh` installs `EXIT`/`INT`/`TERM` traps. Temp artifacts are written next
+  to their source and only existed inside a compressor child, so a Ctrl-C or a
+  `kill` left a truncated `*.tmp.zst` in the user's log directory. Temps are now
+  tracked and removed on any exit path. (Bash defers `SIGINT` while a
+  foreground child runs, so the observable case is a process-group `SIGTERM`.)
+- `zlog.sh` no longer walks the entire home directory **twice** in `deep` /
+  `deep-preview`. The prune count was a second full `find ~` traversal purely to
+  print a number; the single traversal now emits both record kinds and callers
+  distinguish them with `[ -d ]`.
+- `install.sh` no longer destroys a backup when two upgrades land in the same
+  second. `date +%Y%m%d%H%M%S` has one-second granularity, so both computed the
+  same backup name and the unconditional `rm -rf "$BACKUP"` deleted the only
+  good copy. The name now carries `$$` as well.
+- `install.sh` no longer claims "previous version restored" when the rollback
+  failed. The `mv "$BACKUP" "$SKILL_DIR" || true` swallowed the failure and the
+  message was printed unconditionally, leaving a user with no installed skill
+  and a reassuring log line. The rollback result is now checked, and on failure
+  the backup path is printed with a manual recovery command.
+- `zlog_publish` treats any pre-existing destination entry as a conflict.
+  Besides the `-e`/`-L` fix above, the `mv -n` fallback now also requires the
+  destination to be a visible regular file that is not a symlink, since `mv -n`
+  exits 0 even when it declines to overwrite.
+
+Changed:
+
+- `install.sh` iterates `SKILL_FILES` as a bash array instead of a space-joined
+  string. `for f in $SKILL_FILES` relied on word splitting, so any future entry
+  containing a space or a glob character would silently split into bogus paths.
+  `tests/test-install.sh` mirrors the same array so the fixture cannot drift
+  from what the installer actually installs.
+- The unused `TMP_FILE="$(mktemp)"` in `install.sh` is gone; it was created and
+  trapped for cleanup on every run but never used.
+- `restore` declares its loop variables (`out`, `rc`, `tmp`, `tmpd`, `tmpf`)
+  `local` instead of leaking them into the global scope.
+
+Tests:
+
+- `tests/test-posix.sh` asserts on `lexists`, not `[ -e ]`, for the
+  dangling-symlink cases — `-e` is exactly the test that used to lie.
+- `tests/test-posix.sh` quotes every variable that reaches `check`'s `eval`.
+  The "deep-preview changes nothing" checks passed `$HOME` unquoted, so they
+  word-split and silently **failed** (not skipped) on any path containing a
+  space, in a suite whose purpose is portability. 68 unquoted expansions across
+  the file are now quoted inside the `eval`'d string.
+- `tests/test-posix.sh`'s `tree_sum` now fingerprints path, entry type, size,
+  mtime **and content hash**. It previously hashed only the path list, so the
+  "deep-preview changes nothing" assertions could not see an in-place rewrite or
+  a truncation at all — a same-length content change produced an identical
+  fingerprint. NUL-separated throughout and deliberately unsorted: the fixture
+  contains a newline-bearing filename, and `sort -z` does not exist on BSD.
+- `tests/test-posix.sh` gains a self-test for the fingerprint itself, since a
+  helper that silently stops detecting changes would leave the two read-only
+  assertions looking green while proving nothing.
+- `tests/test-posix.sh` uses `SIGTERM` to the compressor's process group, not
+  `SIGINT`. Bash defers `SIGINT` while a foreground child runs, so the script
+  survives, takes its normal "compressor failed" branch and removes the temp
+  itself — which made an earlier version of the interrupt test pass vacuously
+  against the unfixed script. The compressor stub also has to create the temp
+  *before* stalling, exactly as `zstd -o` does.
+- `tests/test-install.sh` pins `date` to a frozen timestamp so the same-second
+  backup collision is deterministic instead of a race, and stubs `mv` to fail
+  the promote *and* the rollback while still allowing the backup step.
+- `tests/test-powershell.ps1` covers empty-archive restore, glob-metacharacter
+  destination names, the restore ownership flag, and the `clean` exit status.
+- `tests/test-powershell.ps1` `Check` now wraps each assertion in try/catch. A
+  single assertion that threw (for example reading a file a previous failure had
+  deleted) aborted the whole suite, hiding every later regression behind the
+  first one.
+- `tests/test-powershell.ps1` measures the `clean` exit status from a **child
+  process**. `& $Script` does not put a PowerShell script's exit status in
+  `$LASTEXITCODE`, which still holds whatever the last native command returned —
+  in that test, the stub compressor's own `1`. The assertion therefore passed
+  against the unfixed script for entirely the wrong reason.
+- `tests/test-powershell.ps1` now exits `0` explicitly on success. Without it
+  pwsh falls back to `$LASTEXITCODE`, which the corrupt-archive fixtures have
+  already set to `1` from their deliberately-failing `gzip -d -c` calls — a
+  fully passing run printed "POWERSHELL TESTS ALL PASS" and still failed CI.
+- `tests/test-powershell.ps1` skips the `clean` exit-status check on Windows.
+  The failure is injected by shadowing the compressor, and PowerShell refuses to
+  run a text file named `tar.exe` as a native command, while in-process function
+  shadowing cannot reach a child process.
+
+Also fixed in this cycle:
+
+- `scripts/zlog.ps1` had drifted from `scripts/zlog.sh` and carried the same
+  class of bugs. All four are fixed in the twin:
+  - The empty-file **purge path had no identity re-check**, unlike the
+    compression path right below it, which makes three. It now re-reads
+    identity and emptiness immediately before deleting.
+  - **`restore` accepted a legitimately empty archive**, matching the POSIX
+    side. The `.Length -gt 0` test rejected a 0-byte decompression, so
+    restoring an empty `.log` reported FAILED. (This fix had landed for
+    `zlog.sh` previously and was never ported.)
+  - **`restore` no longer deletes a file it did not write.** The failure path
+    ran `Remove-Item $out` unconditionally; a `$wrote` flag now records that
+    this run published the destination, so cleanup can only remove our own
+    artifact.
+  - **`clean`/`deep` now exit non-zero when any file fails.** `DoClean` ended on
+    the report line, so a run where every file errored still exited 0.
+- `scripts/zlog.ps1` uses `-LiteralPath` for every path derived from user input.
+  Plain `Test-Path`/`Remove-Item`/`Get-Item` treat `[` and `]` as wildcard
+  character classes, so a destination literally named `srv[1].log` **bypassed
+  the "destination exists" guard and the failure-path cleanup entirely** — the
+  protection silently did nothing for those names. Reproduced, then fixed.
 - `--older-than` now validates its argument. A non-numeric value aborted the
   script under `set -u` with `abc: unbound variable`, and a negative value
   built a nonsense `find -mmin "+-7199"` that reported zero candidates — a

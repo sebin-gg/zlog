@@ -13,6 +13,23 @@
 #   --older-than DAYS  only touch files older than DAYS (default: 0 = 60s age buffer)
 set -u
 
+# Temp artifacts are written next to their source (same filesystem, so publish
+# can hardlink them into place) and named with $$. Record every one so an
+# interrupt cannot leave them behind: the suite asserts "no tmp leftovers", but
+# only ever after a clean exit.
+ZLOG_TEMPS=()
+zlog_track() { ZLOG_TEMPS+=("$1"); }
+zlog_cleanup() {
+  local t
+  for t in ${ZLOG_TEMPS[@]+"${ZLOG_TEMPS[@]}"}; do
+    [ -n "$t" ] && rm -rf "$t" 2>/dev/null
+  done
+  return 0
+}
+trap 'zlog_cleanup' EXIT
+trap 'zlog_cleanup; exit 130' INT
+trap 'zlog_cleanup; exit 143' TERM
+
 ZLOG_MMIN="+1"
 MODE="${1:-}"
 shift || true
@@ -121,10 +138,18 @@ zlog_ident() {
 # when dest now holds the content and tmp is gone. This is the single
 # publish path for every destructive operation in this script.
 zlog_publish() {
-  [ ! -e "$2" ] || return 1
+  # `[ -e ]` follows symlinks, so it is FALSE for a *dangling* symlink sitting
+  # at the destination. A bare `-e` guard waves that case through, and the
+  # caller's failure-path `rm -f` then deletes a pre-existing file this script
+  # never created and never owned. Test for any pre-existing entry, symlink or
+  # not, at both the pre-check and the post-ln re-check.
+  if [ -e "$2" ] || [ -L "$2" ]; then return 1; fi
   if ln "$1" "$2" 2>/dev/null; then rm -f "$1" 2>/dev/null; return 0; fi
-  [ ! -e "$2" ] || return 1
-  if mv -n "$1" "$2" 2>/dev/null && [ -e "$2" ] && [ ! -e "$1" ]; then return 0; fi
+  if [ -e "$2" ] || [ -L "$2" ]; then return 1; fi
+  # `mv -n` exits 0 even when it declines to overwrite, so success means: tmp is
+  # gone AND dest is a visible regular file that is not a symlink.
+  if mv -n "$1" "$2" 2>/dev/null && [ ! -e "$1" ] && [ ! -L "$1" ] \
+     && [ -f "$2" ] && [ ! -L "$2" ]; then return 0; fi
   return 1
 }
 
@@ -137,15 +162,15 @@ zlog_compress_one() {
   ZLOG_STATUS="FAILED"; ZLOG_NEW=""; ZLOG_NEWSIZE=0
   pre=$(zlog_ident "$f" 2>/dev/null) || { echo "[zlog] FAILED (source unreadable): $f (original preserved)"; return 0; }
   if command -v zstd >/dev/null 2>&1; then
-    tmp="$f.$$.tmp.zst"
+    tmp="$f.$$.tmp.zst"; zlog_track "$tmp"
     if zstd -15 -q "$f" -o "$tmp" 2>/dev/null && zstd -t -q "$tmp" 2>/dev/null; then ext=zst; ok=1; else rm -f "$tmp" 2>/dev/null; fi
   fi
   if [ "$ok" -eq 0 ] && command -v xz >/dev/null 2>&1; then
-    tmp="$f.$$.tmp.xz"
+    tmp="$f.$$.tmp.xz"; zlog_track "$tmp"
     if xz -9 -c "$f" > "$tmp" 2>/dev/null && xz -t "$tmp" 2>/dev/null; then ext=xz; ok=1; else rm -f "$tmp" 2>/dev/null; fi
   fi
   if [ "$ok" -eq 0 ]; then
-    tmp="$f.$$.tmp.gz"
+    tmp="$f.$$.tmp.gz"; zlog_track "$tmp"
     if gzip -9 -c "$f" > "$tmp" 2>/dev/null && gzip -t "$tmp" 2>/dev/null; then ext=gz; ok=1; else rm -f "$tmp" 2>/dev/null; fi
   fi
   [ "$ok" -eq 1 ] || { echo "[zlog] FAILED (compressor error): $f (original preserved)"; return 0; }
@@ -217,12 +242,26 @@ do_preview() {
 
 do_clean() {
   local roots=0 candidates=0 compressed=0 raw=0 saved=0 purged=0 skipped=0 failed=0 notbene=0 locked=0
+  local ppre="" pcur=""
   while IFS= read -r -d '' d; do
     roots=$((roots + 1))
     while IFS= read -r -d '' f; do
       [ -z "$f" ] && continue
       if zlog_locked "$f"; then locked=$((locked + 1)); skipped=$((skipped + 1)); continue; fi
-      rm -f "$f" 2>/dev/null && purged=$((purged + 1)) || { failed=$((failed + 1)); }
+      # find(1) decided this file was empty, but a writer may have appended
+      # since that decision. Re-read the identity and the size immediately
+      # before the destructive step and skip on any change, mirroring the two
+      # zlog_ident checks the compress path already makes. zlog_locked is not
+      # a substitute: lsof/fuser miss a writer that opened, wrote and closed
+      # inside the window, and without this the loss is reported as
+      # `purged=1 failed=0` — invisible.
+      ppre=$(zlog_ident "$f" 2>/dev/null) || ppre=""
+      if [ -z "$ppre" ]; then failed=$((failed + 1)); continue; fi
+      pcur=$(zlog_ident "$f" 2>/dev/null) || pcur=""
+      if [ -z "$pcur" ] || [ "$pcur" != "$ppre" ] || [ -s "$f" ]; then
+        skipped=$((skipped + 1)); continue
+      fi
+      if rm -f "$f" 2>/dev/null; then purged=$((purged + 1)); else failed=$((failed + 1)); fi
     done < <(zlog_purge_candidates "$d") || true
     while IFS= read -r -d '' f; do
       [ -z "$f" ] && continue
@@ -242,6 +281,12 @@ do_clean() {
   local dirs=()
   while IFS= read -r -d '' d; do dirs+=("$d"); done < <(zlog_roots) || true
   [ "${#dirs[@]}" -gt 0 ] && du -ch "${dirs[@]}" 2>/dev/null | tail -n 1 || true
+  # Propagate failure. The `failed` counter is only visible in the report line,
+  # and do_clean's last statement is the `du` pipeline above — so without this
+  # a run where every single file errored still exits 0, and any caller gating
+  # on the exit status (SKILL.md documents FAILED as an exit-code failure)
+  # reads total failure as success.
+  [ "$failed" -eq 0 ]
 }
 
 DEEP_PATHS=(-path "*/.claude/*" -o -path "*/.config/claude-code/*" -o -path "*/.gemini/*" \
@@ -253,8 +298,15 @@ DEEP_PATHS=(-path "*/.claude/*" -o -path "*/.config/claude-code/*" -o -path "*/.
   -o -path "*/.config/Windsurf/*" -o -path "*/AppData/Local/Ollama/*")
 
 zlog_deep_candidates() {
-  # read-only candidate listing; caller decides preview vs clean
-  find ~ -maxdepth 12 \( -type d \( "${PRUNE[@]}" \) -prune \) -o \( "${DEEP_PATHS[@]}" \) -type f \
+  # read-only candidate listing; caller decides preview vs clean.
+  #
+  # Emits TWO record kinds over a single walk of $HOME: the prune branch
+  # -print0s each junk directory it skips, the candidate branch -print0s each
+  # log file. Callers separate them with `[ -d ]` (a pruned record is always a
+  # real directory, a candidate always a real file), which is what lets deep
+  # and deep-preview report the prune count without paying for a second full
+  # traversal of the home directory.
+  find ~ -maxdepth 12 \( -type d \( "${PRUNE[@]}" \) -prune -print0 \) -o \( "${DEEP_PATHS[@]}" \) -type f \
     \( -name "*.log" -o -name "*.out" -o -name "*.trace" \) \
     -not -name "*.gz" -not -name "*.zst" -not -name "*.xz" \
     -not -name "*.tmp.*" -not -name "*.jsonl" \
@@ -265,22 +317,25 @@ zlog_deep_candidates() {
 }
 
 do_deep_preview() {
-  local candidates=0 raw=0
+  local candidates=0 raw=0 pruned=0
   echo "[zlog] deep-preview is read-only; known agent locations only (no unknown-agent discovery)"
   while IFS= read -r -d '' f; do
     [ -z "$f" ] && continue
+    # Pruned-record or candidate? See zlog_deep_candidates: one walk emits
+    # both, and only the prune branch can yield a directory.
+    if [ -d "$f" ]; then pruned=$((pruned + 1)); continue; fi
     s=$(zlog_size "$f"); raw=$((raw + s)); candidates=$((candidates + 1))
     echo "[DRY-RUN] Would compress: $f ($(zlog_hum "$s"))"
   done < <(zlog_deep_candidates) || true
-  pruned=$(find ~ -maxdepth 12 -type d \( "${PRUNE[@]}" \) -prune -print 2>/dev/null | wc -l)
   echo ""
   echo "[DRY-RUN] Deep total: $candidates files, $(zlog_hum "$raw") raw; pruned $pruned junk/cache dirs (maxdepth 12)"
 }
 
 do_deep() {
-  local candidates=0 compressed=0 raw=0 saved=0 skipped=0 failed=0 notbene=0 locked=0
+  local candidates=0 compressed=0 raw=0 saved=0 skipped=0 failed=0 notbene=0 locked=0 pruned=0
   while IFS= read -r -d '' f; do
     [ -z "$f" ] && continue
+    if [ -d "$f" ]; then pruned=$((pruned + 1)); continue; fi
     candidates=$((candidates + 1))
     s=$(zlog_size "$f")
     if zlog_locked "$f"; then locked=$((locked + 1)); skipped=$((skipped + 1)); continue; fi
@@ -292,15 +347,17 @@ do_deep() {
       *) failed=$((failed + 1)) ;;
     esac
   done < <(zlog_deep_candidates) || true
-  pruned=$(find ~ -maxdepth 12 -type d \( "${PRUNE[@]}" \) -prune -print 2>/dev/null | wc -l)
   zlog_report deep 1 "$candidates" "$compressed" "$raw" "$saved" 0 "$skipped" "$failed" "$notbene" "$locked"
   echo "[zlog] Pruned $pruned junk/cache dirs (maxdepth 12)"
+  # Same exit-status contract as do_clean: a deep run where every file errored
+  # must not look successful to a caller gating on the exit code.
+  [ "$failed" -eq 0 ]
 }
 
 do_restore() {
   # restore FILE... : decompress archives back next to the original name
   [ "$#" -gt 0 ] || { echo "[zlog] restore: no files given" >&2; exit 2; }
-  local ok=0 fail=0
+  local ok=0 fail=0 rc=1 out="" tmp="" tmpd="" tmpf="" wrote=0
   for a in "$@"; do
     case "$a" in
       *.tar.gz) out="${a%.tar.gz}" ;;
@@ -309,20 +366,26 @@ do_restore() {
       *.xz) out="${a%.xz}" ;;
       *) echo "[zlog] UNSAFE-SKIP (unknown format): $a"; fail=$((fail + 1)); continue ;;
     esac
-    if [ -e "$out" ]; then echo "[zlog] UNSAFE-SKIP (destination exists): $out"; fail=$((fail + 1)); continue; fi
-    rc=1
+    # `[ -e ]` is FALSE for a dangling symlink, so a symlink parked at the
+    # destination used to slip past this guard and then get destroyed by the
+    # failure-path `rm -f "$out"` below — deleting a file zlog never created.
+    # `-L` closes that; together they mean "any pre-existing entry blocks us".
+    if [ -e "$out" ] || [ -L "$out" ]; then
+      echo "[zlog] UNSAFE-SKIP (destination exists): $out"; fail=$((fail + 1)); continue
+    fi
+    rc=1; wrote=0
     case "$a" in
       *.tar.gz)
         # Created by tar -czf with a single entry. Require exactly one
         # member whose name equals the intended basename, extract to a
         # temp dir, and publish without overwriting. Anything else is
         # UNSAFE-SKIP. (No clobbering move anywhere in this script.)
-        tmpd="$out.$$.restore.dir"; tmpf="$tmpd/$(basename "$out")"
+        tmpd="$out.$$.restore.dir"; zlog_track "$tmpd"; tmpf="$tmpd/$(basename "$out")"
         if [ "$(tar -tzf "$a" 2>/dev/null | wc -l)" -eq 1 ] \
           && [ "$(tar -tzf "$a" 2>/dev/null)" = "$(basename "$out")" ] \
           && mkdir -p "$tmpd" 2>/dev/null && tar -xzf "$a" -C "$tmpd" 2>/dev/null \
-          && [ -f "$tmpf" ] && [ ! -L "$tmpf" ] && [ ! -e "$out" ] \
-          && zlog_publish "$tmpf" "$out"; then rc=0;
+          && [ -f "$tmpf" ] && [ ! -L "$tmpf" ] && [ ! -e "$out" ] && [ ! -L "$out" ] \
+          && zlog_publish "$tmpf" "$out" && wrote=1; then rc=0;
         else
           echo "[zlog] UNSAFE-SKIP (member mismatch, multi-entry, or destination busy): $a" >&2
         fi
@@ -330,17 +393,25 @@ do_restore() {
         ;;
       # Stream formats decode to a temp file first: a decompression
       # failure must never leave a partial file at the destination.
-      *.zst) tmp="$out.$$.tmp.restore"; rm -f "$tmp" 2>/dev/null
+      *.zst) tmp="$out.$$.tmp.restore"; zlog_track "$tmp"; rm -f "$tmp" 2>/dev/null
         if command -v zstd >/dev/null 2>&1 && zstd -d -q "$a" -o "$tmp" 2>/dev/null \
-          && [ -f "$tmp" ] && zlog_publish "$tmp" "$out"; then rc=0; else rc=1; rm -f "$tmp" 2>/dev/null; fi ;;
-      *.gz) tmp="$out.$$.tmp.restore"; rm -f "$tmp" 2>/dev/null
+          && [ -f "$tmp" ] && [ ! -L "$tmp" ] && zlog_publish "$tmp" "$out" && wrote=1; then rc=0; else rc=1; rm -f "$tmp" 2>/dev/null; fi ;;
+      *.gz) tmp="$out.$$.tmp.restore"; zlog_track "$tmp"; rm -f "$tmp" 2>/dev/null
         if gzip -d -c "$a" > "$tmp" 2>/dev/null \
-          && [ -f "$tmp" ] && zlog_publish "$tmp" "$out"; then rc=0; else rc=1; rm -f "$tmp" 2>/dev/null; fi ;;
-      *.xz) tmp="$out.$$.tmp.restore"; rm -f "$tmp" 2>/dev/null
+          && [ -f "$tmp" ] && [ ! -L "$tmp" ] && zlog_publish "$tmp" "$out" && wrote=1; then rc=0; else rc=1; rm -f "$tmp" 2>/dev/null; fi ;;
+      *.xz) tmp="$out.$$.tmp.restore"; zlog_track "$tmp"; rm -f "$tmp" 2>/dev/null
         if command -v xz >/dev/null 2>&1 && xz -d -c "$a" > "$tmp" 2>/dev/null \
-          && [ -f "$tmp" ] && zlog_publish "$tmp" "$out"; then rc=0; else rc=1; rm -f "$tmp" 2>/dev/null; fi ;;
+          && [ -f "$tmp" ] && [ ! -L "$tmp" ] && zlog_publish "$tmp" "$out" && wrote=1; then rc=0; else rc=1; rm -f "$tmp" 2>/dev/null; fi ;;
     esac
-    if [ "$rc" -eq 0 ] && [ -f "$out" ]; then echo "[zlog] RESTORED: $out (archive preserved)"; ok=$((ok + 1)); else rm -f "$out" 2>/dev/null; echo "[zlog] FAILED: $a (nothing written)"; fail=$((fail + 1)); fi
+    # `wrote` records that THIS run published the destination, so the cleanup
+    # below can only ever remove our own artifact. Without it, any failure that
+    # happened to leave a pre-existing entry in place would delete it.
+    if [ "$rc" -eq 0 ] && [ "$wrote" -eq 1 ] && [ -f "$out" ] && [ ! -L "$out" ]; then
+      echo "[zlog] RESTORED: $out (archive preserved)"; ok=$((ok + 1))
+    else
+      [ "$wrote" -eq 1 ] && rm -f "$out" 2>/dev/null
+      echo "[zlog] FAILED: $a (nothing written)"; fail=$((fail + 1))
+    fi
   done
   echo "[zlog] restore: ok=$ok failed=$fail"
   [ "$fail" -eq 0 ]

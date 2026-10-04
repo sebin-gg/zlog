@@ -4,12 +4,20 @@
 set -e
 
 ZLOG_REF="${ZLOG_REF:-main}"
-TMP_FILE="$(mktemp)"
-trap 'rm -f "$TMP_FILE"' EXIT
 # ZLOG_REPO_RAW override exists for integration tests (file:// URL); users
 # should keep the default pinned GitHub raw host.
 REPO_RAW="${ZLOG_REPO_RAW:-https://raw.githubusercontent.com/sebin-gg/zlog/${ZLOG_REF}}"
-SKILL_FILES="SKILL.md scripts/zlog.sh scripts/zlog.ps1 references/agent-paths.md references/safety.md references/formats.md"
+# An array, not a space-joined string. `for f in $SKILL_FILES` relies on word
+# splitting, so any future entry containing a space or a glob character would
+# silently split into bogus paths and corrupt the install.
+SKILL_FILES=(
+  SKILL.md
+  scripts/zlog.sh
+  scripts/zlog.ps1
+  references/agent-paths.md
+  references/safety.md
+  references/formats.md
+)
 
 # Skill dirs: primary (agentskills.io spec) + agent-specific locations if their parent exists
 SKILL_DIRS=(
@@ -37,8 +45,8 @@ download() {
 }
 
 TMP_DIR="$(mktemp -d)"
-trap 'rm -rf "$TMP_DIR" "$TMP_FILE"' EXIT
-for f in $SKILL_FILES; do
+trap 'rm -rf "$TMP_DIR"' EXIT
+for f in "${SKILL_FILES[@]}"; do
   mkdir -p "$TMP_DIR/$(dirname "$f")"
   download "$f" "$TMP_DIR/$f"
 done
@@ -58,7 +66,7 @@ for SKILL_DIR in "${SKILL_DIRS[@]}"; do
   # rename into place so a failure can never leave a mixed installation.
   STAGE="$SKILL_DIR.new.$$"
   rm -rf "$STAGE"
-  for f in $SKILL_FILES; do
+  for f in "${SKILL_FILES[@]}"; do
     mkdir -p "$STAGE/$(dirname "$f")"
     cp "$TMP_DIR/$f" "$STAGE/$f"
   done
@@ -69,15 +77,30 @@ for SKILL_DIR in "${SKILL_DIRS[@]}"; do
     exit 1
   fi
   if [ -d "$SKILL_DIR" ]; then
-    BACKUP="$SKILL_DIR.bak.$(date +%Y%m%d%H%M%S)"
+    # `date +%S` has one-second granularity, so two installs inside the same
+    # second produced the same name and the old unconditional `rm -rf "$BACKUP"`
+    # destroyed the only good copy before the new one existed. Add $$ for
+    # per-process uniqueness and keep the rm, which now can only ever hit a
+    # name this process just computed.
+    BACKUP="$SKILL_DIR.bak.$(date +%Y%m%d%H%M%S).$$"
     rm -rf "$BACKUP"
     mv "$SKILL_DIR" "$BACKUP" || { rm -rf "$STAGE"; echo "Error: cannot back up $SKILL_DIR" >&2; exit 1; }
     if mv "$STAGE" "$SKILL_DIR"; then
       echo "✓ installed to $SKILL_DIR/ (previous skill backed up to $BACKUP/)"
     else
-      mv "$BACKUP" "$SKILL_DIR" 2>/dev/null || true
       rm -rf "$STAGE"
-      echo "Error: install to $SKILL_DIR failed, previous version restored" >&2
+      # Only claim the rollback worked if it actually did. The old
+      # `... || true` printed "previous version restored" unconditionally, so a
+      # failed restore left the user with NO installed skill while the message
+      # said otherwise. On failure, name the backup so it is recoverable.
+      if mv "$BACKUP" "$SKILL_DIR" 2>/dev/null; then
+        echo "Error: install to $SKILL_DIR failed, previous version restored" >&2
+      else
+        echo "Error: install to $SKILL_DIR failed AND the rollback also failed." >&2
+        echo "       The previous version is still at: $BACKUP" >&2
+        echo "       Restore it manually with:" >&2
+        echo "         mv \"$BACKUP\" \"$SKILL_DIR\"" >&2
+      fi
       exit 1
     fi
   else
@@ -86,5 +109,5 @@ for SKILL_DIR in "${SKILL_DIRS[@]}"; do
     echo "✓ installed to $SKILL_DIR/ (SKILL.md + scripts/ + references/)"
   fi
 done
-rm -rf "$TMP_DIR" "$TMP_FILE"
+rm -rf "$TMP_DIR"
 echo "Trigger in chat with: 'zlog', 'compress logs', 'clean up chat logs', 'pack logs', 'preview zlog', 'dry run', 'find new AI agents', or 'scan disk for hidden AI logs'."
