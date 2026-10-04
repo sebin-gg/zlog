@@ -1,5 +1,31 @@
 # AGENTS.md — zlog contributor workflow
 
+## Branch hygiene (required)
+
+Merged branches are deleted, never left behind.
+
+- **Before opening a branch or PR**: sweep and delete stale branches first.
+  ```bash
+  git fetch --all --prune
+  gh pr list --state all --head <branch> --json number,state   # MERGED -> candidate
+  git ls-remote --heads origin <branch> | wc -l                # 0 -> remote gone
+  ```
+- **After a PR merges**: delete both halves in the same task.
+  ```bash
+  git push origin --delete <branch>
+  git branch -d <branch>
+  ```
+  (or pass `--delete-branch` to `gh pr merge`).
+- **Squash merges break ancestry checks.** After any squash merge,
+  `git merge-base --is-ancestor <branch> origin/main` returns false even though
+  the work landed. Verify by content instead:
+  ```bash
+  git diff origin/main <branch> -- <files-the-branch-authored>   # empty = in main
+  ```
+  `git cherry` is also unreliable for multi-commit squashes.
+- **Never delete**: `main`, a branch with an `OPEN` PR, or any branch whose
+  content differs from `main` in a way you cannot explain. Ask first.
+
 ## Commit & merge workflow
 
 1. Verify before every commit (see below).
