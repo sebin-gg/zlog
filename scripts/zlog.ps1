@@ -110,9 +110,20 @@ function DoClean() {
         try { Remove-Item -LiteralPath $q -Force -ErrorAction Stop; $purged++ } catch { $failed++ }
       }
       else {
-        # gained content since the scan: put it back untouched
+        # Gained content since the scan: put it back untouched. File.Move fails if
+        # another process recreated $src in the gap — an unverified move-back would
+        # drop the restore record and leave live data at <name>.<PID>.purge while
+        # reporting "skipped" and exiting 0. Verify by artifact, keep the record on
+        # failure so the finally block retries, and say where the data is.
         try { [System.IO.File]::Move($q, $src) } catch { }
-        $skipped++
+        if ((Test-Path -LiteralPath $src -PathType Leaf) -and -not (Test-Path -LiteralPath $q)) {
+          $script:zlogQuarantine.Remove($q)
+          $skipped++
+        }
+        else {
+          Write-Output "[zlog] WARNING: could not restore quarantined file to $src; it remains at $q"
+          $failed++
+        }
       }
       $script:zlogQuarantine.Remove($q)
     }

@@ -302,9 +302,18 @@ zlog_purge_empty() {
     return 2
   fi
   if [ -s "$q" ]; then
+    # It gained content: put it back. `mv -n` fails if another process recreated
+    # $src in the gap, so do NOT swallow that — an unverified move-back would drop
+    # the restore record and leave live data orphaned at <name>.$$.purge while
+    # reporting "skipped" and exiting 0. Verify by artifact, keep the record on
+    # failure so the exit trap retries, and say where the data is.
     mv -n "$q" "$src" 2>/dev/null || true
-    zlog_quarantine_drop
-    return 1
+    if [ -f "$src" ] && [ ! -e "$q" ]; then
+      zlog_quarantine_drop
+      return 1
+    fi
+    echo "[zlog] WARNING: could not restore quarantined file to $src; it remains at $q" >&2
+    return 2
   fi
   local rc=0
   rm -f "$q" 2>/dev/null || rc=2

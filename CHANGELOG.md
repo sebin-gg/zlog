@@ -31,6 +31,12 @@ Fixed:
 - Quarantined files are tracked separately from temp artifacts and are **renamed
   back** on any exit path, never deleted: they are not ours to clean up and may
   hold live data. Conflating the two would turn an interrupt into data loss.
+- A **failed move-back is reported instead of swallowed**. If another process
+  recreates the original name in the gap, `mv -n` will not overwrite it, so the
+  live data stays under the quarantine name. The old code dropped the restore
+  record and counted it as "skipped" — orphaning the data while still exiting 0.
+  Both implementations now verify the move-back by artifact, keep the record so
+  the exit path retries, print where the data is, and count it as a failure.
 - `clean` and `deep` now **exit non-zero when any file fails**. Both counted
   failures into the report line but ended on a `du`/`echo` statement, so a run
   where every file errored still exited 0 and any caller gating on the exit
@@ -85,6 +91,13 @@ Tests:
   **specific** backup path the installer printed. `ls -d "$DEST".bak.* | head -1`
   could match a backup left by an earlier test, so the assertion could pass
   without the one under test existing at all.
+- `tests/test-install.sh` checks that each backup retains **its own** version.
+  Counting backups that merely contained `MARKER-` still passed if both held
+  the same marked copy and the other version had been lost.
+- `tests/test-posix.sh` drives the quarantine restore branch with a stubbed `mv`
+  that appends **after** the rename. The previous version appended before `clean`
+  even started, so `find -empty` never selected the file and the restore branch
+  never ran — the test passed even with that branch broken.
 - `tests/test-posix.sh` no longer contains doubled `""` inside `eval`'d strings.
   A mechanical rewrite had produced `\"\"$ZLOG_TEST_ROOT\"/x\"`, which bash reads
   as `""` followed by an *unquoted* path — so the traversal/mismatch/corrupt

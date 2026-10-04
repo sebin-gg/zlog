@@ -385,14 +385,74 @@ ZLOG_TEST_ROOT="$PQ" bash "$ZLOG_SH" clean > "$FX/pq1.txt" 2>&1
 check "quarantine purges a still-empty file" "[ ! -e \"$PQ/empty.log\" ]"
 check "quarantine leaves no .purge debris" "[ -z \"\$(ls \"$PQ\" | grep 'purge' || true)\" ]"
 check "quarantine reports purged" "grep -q 'purged=1' \"$FX/pq1.txt\""
-# (b) gains content before resolve -> put back, byte-for-byte
+# (b) gains content AFTER the rename -> must be put back, byte-for-byte.
+# The write has to land between the quarantine rename and the emptiness test,
+# otherwise `find -empty` would never have selected the file in the first place.
+# Shadow `mv` so it performs the real rename and then appends to the quarantined
+# copy — that is exactly the interleaving the restore branch exists for.
 : > "$PQ/grew.log"; touch_old "$PQ/grew.log"
-python3 -c "open('$PQ/grew.log','a').write('LIVE SESSION DATA\n')" &
-wait
-ZLOG_TEST_ROOT="$PQ" bash "$ZLOG_SH" clean > "$FX/pq2.txt" 2>&1
-check "non-empty file survives the purge" "[ -f \"$PQ/grew.log\" ]"
+mkdir -p "$FX/wbin"
+cat > "$FX/wbin/mv" <<'MVEOF'
+#!/bin/bash
+src=""; dst=""
+for a in "$@"; do
+  case "$a" in
+    -n) ;;
+    *) if [ -z "$src" ]; then src="$a"; elif [ -z "$dst" ]; then dst="$a"; fi ;;
+  esac
+done
+/bin/mv -n "$src" "$dst" 2>/dev/null || exit 1
+case "$dst" in
+  *.purge) printf 'LIVE SESSION DATA\n' >> "$dst" ;;
+esac
+exit 0
+MVEOF
+chmod +x "$FX/wbin/mv"
+PATH="$FX/wbin:$PATH" ZLOG_TEST_ROOT="$PQ" bash "$ZLOG_SH" clean > "$FX/pq2.txt" 2>&1
+rm -rf "$FX/wbin"
+check "restore-branch ran (counted as skipped, not purged)" "grep -qE 'skipped=[1-9]' \"$FX/pq2.txt\""
+check "file that gained content survives at its original name" "[ -f \"$PQ/grew.log\" ]"
 check "its bytes are intact" "grep -q 'LIVE SESSION DATA' \"$PQ/grew.log\""
-check "no .purge debris after skip" "[ -z \"\$(ls \"$PQ\" | grep 'purge' || true)\" ]"
+check "no .purge debris after restore" "[ -z \"\$(ls \"$PQ\" | grep 'purge' || true)\" ]"
+# (c) gains content AND another process recreates the original name in the gap,
+# so the move-back cannot succeed. `mv -n` will not overwrite, so the live data
+# stays under the quarantine name. That must be REPORTED and must keep the
+# restore record — not silently counted as "skipped" with the record dropped,
+# which would orphan the data and still exit 0.
+mkdir -p "$FX/cbin"
+cat > "$FX/cbin/mv" <<'MVEOF'
+#!/bin/bash
+src=""; dst=""
+for a in "$@"; do
+  case "$a" in
+    -n) ;;
+    *) if [ -z "$src" ]; then src="$a"; elif [ -z "$dst" ]; then dst="$a"; fi ;;
+  esac
+done
+/bin/mv -n "$src" "$dst" 2>/dev/null || exit 1
+case "$dst" in
+  *.purge)
+    printf 'LIVE SESSION DATA\n' >> "$dst"
+    # a writer recreates the original path before we can move back
+    printf 'recreated by another process\n' > "$src"
+    ;;
+esac
+exit 0
+MVEOF
+chmod +x "$FX/cbin/mv"
+: > "$PQ/blocked.log"; touch_old "$PQ/blocked.log"
+PATH="$FX/cbin:$PATH" ZLOG_TEST_ROOT="$PQ" bash "$ZLOG_SH" clean > "$FX/pq3.txt" 2>&1
+blocked_rc=$?
+rm -rf "$FX/cbin"
+check "unrestorable file is counted as failed, not skipped" "grep -qE 'failed=[1-9]' \"$FX/pq3.txt\""
+check "unrestorable file is reported with its path" "grep -q 'could not restore quarantined file' \"$FX/pq3.txt\""
+# NB: $$ here is the *test* script's PID; zlog.sh names the quarantine with its
+# own PID, so glob for it rather than guessing.
+blocked_purge=$(ls "$PQ"/blocked.log.*.purge 2>/dev/null | head -n 1)
+check "unrestorable file is still on disk under its quarantine name" "[ -n \"$blocked_purge\" ]"
+check "its data is intact, not deleted" "[ -s \"$blocked_purge\" ] && grep -q 'LIVE SESSION DATA' \"$blocked_purge\""
+check "unrestorable file makes clean exit non-zero" "[ $blocked_rc -ne 0 ]"
+rm -f "$PQ"/blocked.log.*.purge
 rm -rf "$PQ"
 
 echo "--- quarantine is never orphaned by an interrupt ---"

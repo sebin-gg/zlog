@@ -113,11 +113,18 @@ check "second upgrade succeeded" "[ -d \"$DEST\" ]"
 BACKUPS=$(ls -d "$DEST".bak.* 2>/dev/null | wc -l | tr -d ' ')
 check "two distinct backups survive a same-second reinstall" "[ \"$BACKUPS\" -ge 2 ]"
 if [ "$BACKUPS" -ge 2 ] 2>/dev/null; then
-  kept=0
+  # Each backup must retain its OWN version. Counting backups that merely contain
+  # "MARKER-" would still pass if both held the same marked copy and the other
+  # version had been lost.
+  got_one=0; got_two=0
   for b in "$DEST".bak.*; do
-    grep -q 'MARKER-' "$b/$SKILL_NAME/SKILL.md" 2>/dev/null && kept=$((kept + 1))
+    if [ -f "$b/$SKILL_NAME/SKILL.md" ]; then
+      grep -q 'MARKER-one' "$b/$SKILL_NAME/SKILL.md" 2>/dev/null && got_one=1
+      grep -q 'MARKER-two' "$b/$SKILL_NAME/SKILL.md" 2>/dev/null && got_two=1
+    fi
   done
-  check "each backup still holds its own content" "[ $kept -ge 2 ]"
+  check "first backup retains its own version" "[ $got_one -eq 1 ]"
+  check "second backup retains its own version" "[ $got_two -eq 1 ]"
 fi
 
 echo "--- rollback failure is reported honestly ---"
