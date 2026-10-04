@@ -110,13 +110,35 @@ for SKILL_DIR in "${SKILL_DIRS[@]}"; do
       # `... || true` printed "previous version restored" unconditionally, so a
       # failed restore left the user with NO installed skill while the message
       # said otherwise. On failure, name the backup so it is recoverable.
-      if mv "$BACKUP" "$SKILL_DIR" 2>/dev/null; then
+      # Never move INTO an occupied destination: if another installer created
+      # $SKILL_DIR in the gap, plain `mv "$BACKUP" "$SKILL_DIR"` would succeed
+      # by nesting the backup as $SKILL_DIR/<basename> and still exit 0, so the
+      # next line would claim a restore that never happened. Refuse the move
+      # and report the backup path instead. The artifact check after the move
+      # covers the residual race (occupied between our check and the mv): a
+      # nested move leaves $SKILL_DIR/<basename> behind, which a real restore
+      # never produces.
+      if [ -e "$SKILL_DIR" ] || [ -L "$SKILL_DIR" ]; then
+        echo "Error: install to $SKILL_DIR failed AND the rollback was skipped:" >&2
+        echo "       $SKILL_DIR is now occupied (possibly by another installer)," >&2
+        echo "       so moving the backup there would nest it instead of restoring it." >&2
+        echo "       The previous version is still at: $BACKUP" >&2
+      elif mv "$BACKUP" "$SKILL_DIR" 2>/dev/null \
+        && [ -d "$SKILL_DIR" ] \
+        && [ ! -e "$BACKUP" ] && [ ! -L "$BACKUP" ] \
+        && [ ! -e "$SKILL_DIR/$(basename "$SKILL_DIR")" ]; then
         echo "Error: install to $SKILL_DIR failed, previous version restored" >&2
       else
-        echo "Error: install to $SKILL_DIR failed AND the rollback also failed." >&2
-        echo "       The previous version is still at: $BACKUP" >&2
-        echo "       Restore it manually with:" >&2
-        echo "         mv \"$BACKUP\" \"$SKILL_DIR\"" >&2
+        if [ -e "$SKILL_DIR/$(basename "$SKILL_DIR")" ] || [ -L "$SKILL_DIR/$(basename "$SKILL_DIR")" ]; then
+          echo "Error: install to $SKILL_DIR failed AND the rollback nested the backup" >&2
+          echo "       inside the occupying directory instead of restoring it." >&2
+          echo "       The previous version is still at: $SKILL_DIR/$(basename "$SKILL_DIR")" >&2
+        else
+          echo "Error: install to $SKILL_DIR failed AND the rollback also failed." >&2
+          echo "       The previous version is still at: $BACKUP" >&2
+          echo "       Restore it manually with:" >&2
+          echo "         mv \"$BACKUP\" \"$SKILL_DIR\"" >&2
+        fi
       fi
       exit 1
     fi

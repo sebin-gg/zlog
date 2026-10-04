@@ -108,6 +108,7 @@ function DoClean() {
       try { $qLen = (Get-Item -LiteralPath $q -ErrorAction Stop).Length } catch { $qLen = -1 }
       if ($qLen -eq 0) {
         try { Remove-Item -LiteralPath $q -Force -ErrorAction Stop; $purged++ } catch { $failed++ }
+        $script:zlogQuarantine.Remove($q)
       }
       else {
         # Gained content since the scan: put it back untouched. File.Move fails if
@@ -115,6 +116,8 @@ function DoClean() {
         # drop the restore record and leave live data at <name>.<PID>.purge while
         # reporting "skipped" and exiting 0. Verify by artifact, keep the record on
         # failure so the finally block retries, and say where the data is.
+        # NB: no unconditional Remove after this branch — on failure the record
+        # must stay so the finally block can still retry the restore.
         try { [System.IO.File]::Move($q, $src) } catch { }
         if ((Test-Path -LiteralPath $src -PathType Leaf) -and -not (Test-Path -LiteralPath $q)) {
           $script:zlogQuarantine.Remove($q)
@@ -125,7 +128,6 @@ function DoClean() {
           $failed++
         }
       }
-      $script:zlogQuarantine.Remove($q)
     }
   }
   finally {

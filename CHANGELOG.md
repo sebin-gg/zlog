@@ -66,6 +66,20 @@ Fixed:
   message was printed unconditionally, leaving a user with no installed skill
   and a reassuring log line. The rollback result is now checked, and on failure
   the backup path is printed with a manual recovery command.
+- `install.sh` never rolls back **into** an occupied directory. If another
+  installer creates `$SKILL_DIR` after the promote fails, plain
+  `mv "$BACKUP" "$SKILL_DIR"` succeeds by nesting the backup as
+  `$SKILL_DIR/zlog` and still exits 0 — the old check-then-claim would report a
+  restore that never happened. The installer now refuses the move when the
+  destination is occupied and reports the backup path instead, and the success
+  claim additionally requires the backup to be gone *without* a nested copy left
+  behind (which a real restore never produces). A nested move that still slips
+  through the residual race is reported at its actual location.
+- The PowerShell purge keeps the quarantine record on a failed move-back. The
+  fix that made failures count as `failed` left an unconditional
+  `$script:zlogQuarantine.Remove($q)` after the branch, which dropped the record
+  the comment above it promises to keep for the `finally` retry — the shell
+  implementation keeps it (the exit trap retries), the PowerShell one did not.
 - `zlog_publish` treats any pre-existing destination entry as a conflict.
   Besides the `-e`/`-L` fix above, the `mv -n` fallback now also requires the
   destination to be a visible regular file that is not a symlink, since `mv -n`
@@ -91,6 +105,12 @@ Tests:
   **specific** backup path the installer printed. `ls -d "$DEST".bak.* | head -1`
   could match a backup left by an earlier test, so the assertion could pass
   without the one under test existing at all.
+- `tests/test-install.sh` covers a rollback where the destination is
+  **occupied by a concurrent installer**. A stubbed `mv` fails the promote and
+  recreates the destination with its own marker; the test asserts the installer
+  refuses the move (no `$DEST/zlog` nesting), leaves the occupant untouched, and
+  names the surviving backup. Verified the scenario nests and falsely claims
+  "previous version restored" against the pre-fix installer.
 - `tests/test-install.sh` checks that each backup retains **its own** version.
   Counting backups that merely contained `MARKER-` still passed if both held
   the same marked copy and the other version had been lost.

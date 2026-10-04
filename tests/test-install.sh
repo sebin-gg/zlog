@@ -169,9 +169,59 @@ else
   check "reported backup exists on disk" "[ -d \"$DEADBAK\" ]"
   check "reported backup holds the previous skill" "[ -s \"$DEADBAK/SKILL.md\" ] && cmp -s \"$DEADBAK/SKILL.md\" \"$FX/pre-deadmv.bak\""
 fi
-# Put a working skill back so the exit trap's tree is coherent.
+# Put a working skill back so the next test starts from a live install.
 rm -rf "$DEST"; mkdir -p "$DEST"
 ZLOG_REPO_RAW="file://$FX/repo" bash "$REPO/install.sh" > "$FX/i9.txt" 2>&1 || true
+
+echo "--- rollback never nests into an occupied destination ---"
+# If another installer creates $DEST after our promote fails, plain
+# `mv "$BACKUP" "$DEST"` would succeed by nesting the backup as $DEST/zlog
+# and still exit 0 — the old code then claimed "previous version restored"
+# while nothing was restored. The installer must refuse the move, keep the
+# backup where it is, and say the destination is occupied.
+mkdir -p "$FX/racemv"
+cat > "$FX/racemv/mv" <<'EOF'
+#!/bin/bash
+# Fail the promote (STAGE -> live, matches *.new.*) but simulate a concurrent
+# installer winning the gap: recreate the DESTINATION (last positional arg) as
+# a directory holding its own marker. Pass everything else to the real mv.
+pos=()
+for a in "$@"; do
+  case "$a" in
+    -*) ;;
+    *) pos+=("$a") ;;
+  esac
+done
+for a in "${pos[@]}"; do
+  case "$a" in
+    *.new.*)
+      last="${pos[${#pos[@]}-1]}"
+      mkdir -p "$last"
+      printf 'CONCURRENT-INSTALLER\n' > "$last/SKILL.md" 2>/dev/null
+      exit 1
+      ;;
+  esac
+done
+if [ -x /bin/mv ]; then exec /bin/mv "$@"; else exec /usr/bin/mv "$@"; fi
+EOF
+chmod +x "$FX/racemv/mv"
+cp "$DEST/SKILL.md" "$FX/pre-race.bak" 2>/dev/null || true
+if PATH="$FX/racemv:$PATH" ZLOG_REPO_RAW="file://$FX/repo" bash "$REPO/install.sh" > "$FX/i10.txt" 2>&1; then
+  echo "FAIL: install succeeded despite failing promote"; fail=1
+else
+  echo "PASS: install failed as expected"
+  check "does not falsely claim rollback succeeded" "! grep -q 'previous version restored' \"$FX/i10.txt\""
+  check "says the destination is occupied" "grep -qi 'occupied' \"$FX/i10.txt\""
+  check "backup was not nested into the occupant" "[ ! -e \"$DEST/$SKILL_NAME\" ]"
+  check "concurrent occupant untouched" "grep -q 'CONCURRENT-INSTALLER' \"$DEST/SKILL.md\""
+  RACEBAK=$(sed -n 's/^.*still at: //p' "$FX/i10.txt" | head -n 1)
+  check "reported backup path is non-empty" "[ -n \"$RACEBAK\" ]"
+  check "reported backup exists on disk" "[ -d \"$RACEBAK\" ]"
+  check "reported backup holds the previous skill" "[ -s \"$RACEBAK/SKILL.md\" ] && cmp -s \"$RACEBAK/SKILL.md\" \"$FX/pre-race.bak\""
+fi
+# Put a working skill back so the exit trap's tree is coherent.
+rm -rf "$DEST"; mkdir -p "$DEST"
+ZLOG_REPO_RAW="file://$FX/repo" bash "$REPO/install.sh" > "$FX/i11.txt" 2>&1 || true
 
 if [ "$fail" -eq 0 ]; then echo "INSTALL TESTS ALL PASS"; else echo "INSTALL TESTS FAILED"; fi
 exit $fail
