@@ -9,8 +9,17 @@ REPO="$(cd "$REPO" && pwd)"
 FX="$(mktemp -d)"; trap 'chmod -R u+rwX "$FX" 2>/dev/null; rm -rf "$FX"' EXIT
 export HOME="$FX/home"
 mkdir -p "$HOME" "$FX/repo"
-SKILL_FILES="SKILL.md scripts/zlog.sh scripts/zlog.ps1 references/agent-paths.md references/safety.md references/formats.md"
-for f in $SKILL_FILES; do
+# Mirror install.sh's array exactly — a space-joined string here would let the
+# fixture drift from what the installer actually installs.
+SKILL_FILES=(
+  SKILL.md
+  scripts/zlog.sh
+  scripts/zlog.ps1
+  references/agent-paths.md
+  references/safety.md
+  references/formats.md
+)
+for f in "${SKILL_FILES[@]}"; do
   mkdir -p "$FX/repo/$(dirname "$f")"
   cp "$REPO/$f" "$FX/repo/$f"
 done
@@ -22,7 +31,7 @@ DEST="$HOME/.agents/skills/zlog"
 echo "--- fresh install ---"
 ZLOG_REPO_RAW="file://$FX/repo" bash "$REPO/install.sh" > "$FX/i1.txt" \
   || { echo "FAIL: fresh install exited nonzero"; fail=1; }
-for f in $SKILL_FILES; do
+for f in "${SKILL_FILES[@]}"; do
   check "installed $f" "[ -s \"$DEST/$f\" ]"
 done
 check "executable bit" "[ -x \"$DEST/scripts/zlog.sh\" ]"
@@ -32,11 +41,18 @@ echo "--- upgrade backs up whole previous dir ---"
 echo "OLD-MARKER" >> "$DEST/SKILL.md"
 ZLOG_REPO_RAW="file://$FX/repo" bash "$REPO/install.sh" > "$FX/i2.txt" \
   || { echo "FAIL: upgrade exited nonzero"; fail=1; }
-BACKUP="$(ls -d "$DEST".bak.* 2>/dev/null | head -n 1)"
-check "backup dir created" "[ -n \"$BACKUP\" ] && [ -d \"$BACKUP\" ]"
+# Backups now live one level down: $(basename "$DEST").bak.XXXXXXXXXX/zlog/.
+# The container is the atomically-reserved mktemp -d; the skill is moved in as a
+# named child so `mv` can never nest it inside a directory that raced us.
+SKILL_NAME="$(basename "$DEST")"
+CONTAINER="$(ls -d "$DEST".bak.* 2>/dev/null | head -n 1)"
+BACKUP="$CONTAINER/$SKILL_NAME"
+check "backup container created" "[ -n \"$CONTAINER\" ] && [ -d \"$CONTAINER\" ]"
+check "backup dir created" "[ -d \"$BACKUP\" ]"
 check "backup has old content" "grep -q OLD-MARKER \"$BACKUP/SKILL.md\""
 check "live dir fresh" "! grep -q OLD-MARKER \"$DEST/SKILL.md\""
 check "backup is full skill" "[ -s \"$BACKUP/scripts/zlog.sh\" ] && [ -s \"$BACKUP/references/safety.md\" ]"
+check "skill not nested inside a stray dir" "[ ! -d \"$BACKUP/$SKILL_NAME\" ]"
 
 echo "--- invalid skill aborts, live untouched ---"
 cp "$DEST/SKILL.md" "$FX/live-skill.bak"
@@ -74,6 +90,159 @@ else
   echo "PASS: install failed as expected"
   check "rollback restored live skill" "[ -d \"$DEST\" ] && cmp -s \"$DEST/SKILL.md\" \"$FX/live-skill.bak\""
 fi
+
+echo "--- two installs in the same second keep both backups ---"
+# `date +%Y%m%d%H%M%S` has one-second granularity, so two upgrades inside the
+# same second computed the SAME backup name and the unconditional
+# `rm -rf "$BACKUP"` destroyed the only good copy. Pin `date` so the collision
+# is deterministic instead of a race, and assert neither backup was clobbered.
+mkdir -p "$FX/fakedate"
+cat > "$FX/fakedate/date" <<'EOF'
+#!/bin/bash
+# ignore the format and always return the same frozen timestamp
+echo 20200101000000
+EOF
+chmod +x "$FX/fakedate/date"
+mark_backup() { echo "MARKER-$1" >> "$DEST/SKILL.md"; }
+mark_backup one
+PATH="$FX/fakedate:$PATH" ZLOG_REPO_RAW="file://$FX/repo" bash "$REPO/install.sh" > "$FX/i6.txt" 2>&1
+check "first upgrade succeeded" "[ -d \"$DEST\" ]"
+mark_backup two
+PATH="$FX/fakedate:$PATH" ZLOG_REPO_RAW="file://$FX/repo" bash "$REPO/install.sh" > "$FX/i7.txt" 2>&1
+check "second upgrade succeeded" "[ -d \"$DEST\" ]"
+BACKUPS=$(ls -d "$DEST".bak.* 2>/dev/null | wc -l | tr -d ' ')
+check "two distinct backups survive a same-second reinstall" "[ \"$BACKUPS\" -ge 2 ]"
+if [ "$BACKUPS" -ge 2 ] 2>/dev/null; then
+  # Each backup must retain its OWN version. Counting backups that merely contain
+  # "MARKER-" would still pass if both held the same marked copy and the other
+  # version had been lost.
+  got_one=0; got_two=0
+  for b in "$DEST".bak.*; do
+    if [ -f "$b/$SKILL_NAME/SKILL.md" ]; then
+      grep -q 'MARKER-one' "$b/$SKILL_NAME/SKILL.md" 2>/dev/null && got_one=1
+      grep -q 'MARKER-two' "$b/$SKILL_NAME/SKILL.md" 2>/dev/null && got_two=1
+    fi
+  done
+  check "first backup retains its own version" "[ $got_one -eq 1 ]"
+  check "second backup retains its own version" "[ $got_two -eq 1 ]"
+fi
+
+echo "--- rollback failure is reported honestly ---"
+# The old code ran `mv "$BACKUP" "$SKILL_DIR" || true` and then printed
+# "previous version restored" unconditionally, so a failed rollback left the
+# user with NO installed skill while the message claimed otherwise.
+mkdir -p "$FX/deadmv"
+cat > "$FX/deadmv/mv" <<'EOF'
+#!/bin/bash
+# Fail the promote (STAGE -> live) and the rollback (BACKUP -> live), but
+# ALLOW the backup step (live -> BACKUP). Distinguish by argument position:
+# in `mv "$SKILL_DIR" "$BACKUP"` only the SECOND arg matches *.bak.*, while in
+# `mv "$BACKUP" "$SKILL_DIR"` the FIRST one does.
+n=0
+for a in "$@"; do
+  n=$((n + 1))
+  case "$a" in
+    *.new.*) exit 1 ;;
+  esac
+  if [ "$n" -eq 1 ]; then
+    case "$a" in
+      *.bak.*) exit 1 ;;
+    esac
+  fi
+done
+if [ -x /bin/mv ]; then exec /bin/mv "$@"; else exec /usr/bin/mv "$@"; fi
+EOF
+chmod +x "$FX/deadmv/mv"
+cp "$DEST/SKILL.md" "$FX/pre-deadmv.bak" 2>/dev/null || true
+if PATH="$FX/deadmv:$PATH" ZLOG_REPO_RAW="file://$FX/repo" bash "$REPO/install.sh" > "$FX/i8.txt" 2>&1; then
+  echo "FAIL: install succeeded despite failing promote"; fail=1
+else
+  echo "PASS: install failed as expected"
+  check "does not falsely claim rollback succeeded" "! grep -q 'previous version restored' \"$FX/i8.txt\""
+  check "says the rollback also failed" "grep -qi 'rollback also failed' \"$FX/i8.txt\""
+  check "names the recoverable backup" "grep -q 'still at:' \"$FX/i8.txt\""
+  # Assert on the SPECIFIC backup the installer named, not `ls -d *.bak.* |
+  # head -1` — earlier tests already left backups behind, so the old form could
+  # pass by picking up one of those instead of the one this install created.
+  DEADBAK=$(sed -n 's/^.*still at: //p' "$FX/i8.txt" | head -n 1)
+  check "reported backup path is non-empty" "[ -n \"$DEADBAK\" ]"
+  check "reported backup exists on disk" "[ -d \"$DEADBAK\" ]"
+  check "reported backup holds the previous skill" "[ -s \"$DEADBAK/SKILL.md\" ] && cmp -s \"$DEADBAK/SKILL.md\" \"$FX/pre-deadmv.bak\""
+fi
+# Put a working skill back so the next test starts from a live install.
+rm -rf "$DEST"; mkdir -p "$DEST"
+ZLOG_REPO_RAW="file://$FX/repo" bash "$REPO/install.sh" > "$FX/i9.txt" 2>&1 || true
+
+echo "--- rollback never nests into an occupied destination ---"
+# If another installer creates $DEST after our promote fails, plain
+# `mv "$BACKUP" "$DEST"` would succeed by nesting the backup as $DEST/zlog
+# and still exit 0 — the old code then claimed "previous version restored"
+# while nothing was restored. The installer must refuse the move, keep the
+# backup where it is, and say the destination is occupied.
+mkdir -p "$FX/racemv"
+cat > "$FX/racemv/mv" <<'EOF'
+#!/bin/bash
+# Fail the promote (STAGE -> live, matches *.new.*) but simulate a concurrent
+# installer winning the gap: recreate the DESTINATION (last positional arg) as
+# a directory holding its own marker. Pass everything else to the real mv.
+pos=()
+for a in "$@"; do
+  case "$a" in
+    -*) ;;
+    *) pos+=("$a") ;;
+  esac
+done
+for a in "${pos[@]}"; do
+  case "$a" in
+    *.new.*)
+      last="${pos[${#pos[@]}-1]}"
+      mkdir -p "$last"
+      printf 'CONCURRENT-INSTALLER\n' > "$last/SKILL.md" 2>/dev/null
+      exit 1
+      ;;
+  esac
+done
+if [ -x /bin/mv ]; then exec /bin/mv "$@"; else exec /usr/bin/mv "$@"; fi
+EOF
+chmod +x "$FX/racemv/mv"
+cp "$DEST/SKILL.md" "$FX/pre-race.bak" 2>/dev/null || true
+if PATH="$FX/racemv:$PATH" ZLOG_REPO_RAW="file://$FX/repo" bash "$REPO/install.sh" > "$FX/i10.txt" 2>&1; then
+  echo "FAIL: install succeeded despite failing promote"; fail=1
+else
+  echo "PASS: install failed as expected"
+  check "does not falsely claim rollback succeeded" "! grep -q 'previous version restored' \"$FX/i10.txt\""
+  check "says the destination is occupied" "grep -qi 'occupied' \"$FX/i10.txt\""
+  check "backup was not nested into the occupant" "[ ! -e \"$DEST/$SKILL_NAME\" ]"
+  check "concurrent occupant untouched" "grep -q 'CONCURRENT-INSTALLER' \"$DEST/SKILL.md\""
+  RACEBAK=$(sed -n 's/^.*still at: //p' "$FX/i10.txt" | head -n 1)
+  check "reported backup path is non-empty" "[ -n \"$RACEBAK\" ]"
+  check "reported backup exists on disk" "[ -d \"$RACEBAK\" ]"
+  check "reported backup holds the previous skill" "[ -s \"$RACEBAK/SKILL.md\" ] && cmp -s \"$RACEBAK/SKILL.md\" \"$FX/pre-race.bak\""
+fi
+# Put a working skill back so the next test starts from a live install.
+rm -rf "$DEST"; mkdir -p "$DEST"
+ZLOG_REPO_RAW="file://$FX/repo" bash "$REPO/install.sh" > "$FX/i11.txt" 2>&1 || true
+
+echo "--- rollback with a pre-existing same-named child still reports restore ---"
+# The previous installation may contain a top-level child also named `zlog`.
+# That child rode along inside the backup; device+inode says it is NOT the
+# moved backup itself, so a successful rollback must still be reported as a
+# restore — not as a nesting. (The race test above covers the other quadrant:
+# a same-inode child left by a concurrent occupant.)
+printf 'pre-existing child\n' > "$DEST/$SKILL_NAME"
+cp "$DEST/SKILL.md" "$FX/pre-child.bak"
+if PATH="$FX/partialmv:$PATH" ZLOG_REPO_RAW="file://$FX/repo" bash "$REPO/install.sh" > "$FX/i12.txt" 2>&1; then
+  echo "FAIL: install succeeded despite failing promote"; fail=1
+else
+  echo "PASS: install failed as expected"
+  check "successful rollback is still reported as restored" "grep -q 'previous version restored' \"$FX/i12.txt\""
+  check "rollback is not misreported as nesting" "! grep -qi 'nested' \"$FX/i12.txt\""
+  check "pre-existing child was restored with the skill" "grep -q 'pre-existing child' \"$DEST/$SKILL_NAME\""
+  check "live skill restored" "[ -d \"$DEST\" ] && cmp -s \"$DEST/SKILL.md\" \"$FX/pre-child.bak\""
+fi
+# Put a working skill back so the exit trap's tree is coherent.
+rm -rf "$DEST"; mkdir -p "$DEST"
+ZLOG_REPO_RAW="file://$FX/repo" bash "$REPO/install.sh" > "$FX/i13.txt" 2>&1 || true
 
 if [ "$fail" -eq 0 ]; then echo "INSTALL TESTS ALL PASS"; else echo "INSTALL TESTS FAILED"; fi
 exit $fail

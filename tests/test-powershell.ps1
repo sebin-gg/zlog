@@ -6,7 +6,14 @@ $base = Join-Path ([IO.Path]::GetTempPath()) ('zlogtest_' + [Guid]::NewGuid().To
 $env:ZLOG_TEST_ROOT = Join-Path $base '.claude'
 New-Item -ItemType Directory -Path (Join-Path $env:ZLOG_TEST_ROOT 'node_modules') -Force | Out-Null
 $fail = 0
-function Check($n, $c) { if (& $c) { Write-Output "PASS: $n" } else { Write-Output "FAIL: $n"; $script:fail++ } }
+function Check($n, $c) {
+  # Wrap in try/catch: without it a single assertion that throws (e.g. reading
+  # a file a previous failure deleted) aborts the whole suite, hiding every
+  # later regression behind the first one.
+  $ok = $false
+  try { $ok = [bool](& $c) } catch { $ok = $false }
+  if ($ok) { Write-Output "PASS: $n" } else { Write-Output "FAIL: $n"; $script:fail++ }
+}
 function BigFile($p, $kb, $seed) {
   $rnd = New-Object Random($seed); $b = New-Object byte[] ($kb * 1024)
   for ($i = 0; $i -lt $b.Length; $i++) { $b[$i] = [byte](65 + $rnd.Next(26)) }
@@ -110,6 +117,110 @@ BigFile (Join-Path $r 'space name.log') 20 22
 & $Script clean | Out-Null
 Check 'space archived' { (-not (Test-Path (Join-Path $r 'space name.log'))) -and (Test-Path (Join-Path $r 'space name.log.tar.gz')) }
 
+Write-Output '--- empty archive restore (0-byte original is legitimate) ---'
+# The old guard required the decompressed temp to be non-empty, so restoring an
+# empty .log reported FAILED and deleted its own output. Corrupt archives must
+# still be refused with nothing written.
+[IO.File]::WriteAllBytes((Join-Path $r 'empty.log'), (New-Object byte[] 0))
+& tar -czf (Join-Path $r 'empty.log.tar.gz') -C $r 'empty.log' 2>$null
+Remove-Item (Join-Path $r 'empty.log') -Force -ErrorAction SilentlyContinue
+& $Script restore (Join-Path $r 'empty.log.tar.gz') | Out-Null
+$empRc = $LASTEXITCODE
+Check 'empty restore succeeds' { $empRc -eq 0 }
+Check 'empty restore produced the file' { Test-Path (Join-Path $r 'empty.log') }
+Check 'empty restore is 0 bytes' { (Test-Path -LiteralPath (Join-Path $r 'empty.log')) -and ((Get-Item -LiteralPath (Join-Path $r 'empty.log')).Length -eq 0) }
+Remove-Item (Join-Path $r 'empty.log') -Force -ErrorAction SilentlyContinue
+Remove-Item (Join-Path $r 'empty.log.tar.gz') -Force -ErrorAction SilentlyContinue
+
+Write-Output '--- destination names with glob metacharacters ---'
+# Plain Test-Path / Remove-Item treat [ ] as a wildcard character class, so a
+# destination named `srv[1].log` bypassed the "destination exists" guard and the
+# failure-path cleanup entirely. -LiteralPath is what makes the guard real.
+[IO.File]::WriteAllText((Join-Path $r 'srv[1].log'), 'PRECIOUS PRE-EXISTING CONTENT')
+[IO.File]::WriteAllText((Join-Path $r 'gsrc.log'), 'restored')
+& tar -czf (Join-Path $r 'srv[1].log.tar.gz') -C $r 'gsrc.log' 2>$null
+Remove-Item -LiteralPath (Join-Path $r 'gsrc.log') -Force -ErrorAction SilentlyContinue
+$globOut = @(& $Script restore (Join-Path $r 'srv[1].log.tar.gz'))
+$globOut | ForEach-Object { Write-Output $_ }
+$globRc = $LASTEXITCODE
+Check 'glob-name dest refused' { $globRc -ne 0 }
+Check 'glob-name guard actually fired' { $globOut -match 'UNSAFE-SKIP \(destination exists\)' }
+Check 'glob-name content untouched' { (Test-Path -LiteralPath (Join-Path $r 'srv[1].log')) -and ([IO.File]::ReadAllText((Join-Path $r 'srv[1].log')) -eq 'PRECIOUS PRE-EXISTING CONTENT') }
+Remove-Item -LiteralPath (Join-Path $r 'srv[1].log') -Force -ErrorAction SilentlyContinue
+Remove-Item -LiteralPath (Join-Path $r 'srv[1].log.tar.gz') -Force -ErrorAction SilentlyContinue
+
+Write-Output '--- restore never deletes a pre-existing file it did not write ---'
+# The failure path used to run `Remove-Item $out` unconditionally, so a restore
+# that failed for any other reason could delete a pre-existing file. The
+# `$wrote` flag means the cleanup can only ever remove this run's own output.
+[IO.File]::WriteAllBytes((Join-Path $r 'svc.log.zst'), (New-Object byte[] 64))
+[IO.File]::WriteAllText((Join-Path $r 'svc.log'), 'NOT OURS')
+& $Script restore (Join-Path $r 'svc.log.zst') | Out-Null
+$svcRc = $LASTEXITCODE
+Check 'failed restore refused' { $svcRc -ne 0 }
+Check 'failed restore left the pre-existing file' { Test-Path (Join-Path $r 'svc.log') }
+Remove-Item (Join-Path $r 'svc.log') -Force -ErrorAction SilentlyContinue
+Remove-Item (Join-Path $r 'svc.log.zst') -Force -ErrorAction SilentlyContinue
+
+Write-Output '--- purge quarantines the name before deleting ---'
+# The rename is the load-bearing part: after it, a writer opening by path cannot
+# reach the file, so the check-then-remove window no longer exists. Assert the
+# observable invariants here; the race-specific regression lives in
+# test-posix.sh, where it can be made deterministic by stalling the rename.
+$PQP = Join-Path $base 'purgeq'
+New-Item -ItemType Directory -Path $PQP -Force | Out-Null
+[IO.File]::WriteAllBytes((Join-Path $PQP 'stillempty.log'), (New-Object byte[] 0))
+[IO.File]::WriteAllText((Join-Path $PQP 'hasbytes.log'), 'LIVE SESSION DATA')
+$oldPq = (Get-Date).AddMinutes(-5)
+(Get-Item -LiteralPath (Join-Path $PQP 'stillempty.log')).LastWriteTime = $oldPq
+(Get-Item -LiteralPath (Join-Path $PQP 'hasbytes.log')).LastWriteTime = $oldPq
+$oldP = $env:ZLOG_TEST_ROOT
+$env:ZLOG_TEST_ROOT = $PQP
+& $Script clean | Out-Null
+$env:ZLOG_TEST_ROOT = $oldP
+Check 'quarantine purges a still-empty file' { -not (Test-Path -LiteralPath (Join-Path $PQP 'stillempty.log')) }
+Check 'quarantine leaves the non-empty file' { Test-Path -LiteralPath (Join-Path $PQP 'hasbytes.log') }
+Check 'its bytes are intact' { [IO.File]::ReadAllText((Join-Path $PQP 'hasbytes.log')) -eq 'LIVE SESSION DATA' }
+Check 'quarantine leaves no .purge debris' { @(Get-ChildItem -LiteralPath $PQP -Filter '*.purge' -Recurse -ErrorAction SilentlyContinue).Count -eq 0 }
+Remove-Item -LiteralPath $PQP -Recurse -Force -ErrorAction SilentlyContinue
+
+Write-Output '--- clean exits non-zero when files fail ---'
+# DoClean used to end on the report line, so a run where every file errored
+# still exited 0 and any caller gating on the exit status read it as success.
+#
+# Run in a CHILD process: `& $Script` does not put the script's exit status in
+# $LASTEXITCODE, which still holds whatever the last *native* command returned.
+# That made this assertion pass against the unfixed script for the wrong reason.
+#
+# Injected by shadowing the compressor with a stub that always fails. That is
+# Unix-only: on Windows PowerShell refuses to run a text file named `tar.exe`
+# as a native command ("StandardErrorEncoding is only supported when standard
+# error is redirected"), and in-process function shadowing cannot reach a child
+# process. So the exit-status contract is asserted here on Unix, and on Windows
+# it is covered indirectly by the `restore` exit-status checks above.
+if ($PSVersionTable.Platform -ne 'Unix') {
+  Write-Output 'SKIP: clean exit-status (compressor stub cannot shadow tar.exe on Windows)'
+} else {
+  $deadBin = Join-Path $base 'deadbin'
+  New-Item -ItemType Directory -Path $deadBin -Force | Out-Null
+  [IO.File]::WriteAllText((Join-Path $deadBin 'tar'), "#!/bin/sh`nexit 1`n")
+  & /bin/chmod '+x' (Join-Path $deadBin 'tar') 2>$null
+  $oldPath = $env:PATH
+  $env:PATH = $deadBin + [IO.Path]::PathSeparator + $oldPath
+  BigFile (Join-Path $r 'deadc.log') 20 31
+  (Get-Item -LiteralPath (Join-Path $r 'deadc.log')).LastWriteTime = (Get-Date).AddMinutes(-5)
+  $selfExe = (Get-Process -Id $PID).Path
+  $deadOut = @(& $selfExe -NoLogo -NoProfile -ExecutionPolicy Bypass -File $Script clean 2>&1)
+  $deadOut | ForEach-Object { Write-Output $_ }
+  $deadRc = $LASTEXITCODE
+  Check 'failing clean reports failed>0' { $deadOut -match 'failed=[1-9]' }
+  Check 'failing clean exits non-zero' { $deadRc -ne 0 }
+  Check 'failing clean preserved the source' { Test-Path -LiteralPath (Join-Path $r 'deadc.log') }
+  $env:PATH = $oldPath
+  Remove-Item -LiteralPath (Join-Path $r 'deadc.log') -Force -ErrorAction SilentlyContinue
+  Remove-Item -LiteralPath $deadBin -Recurse -Force -ErrorAction SilentlyContinue
+}
+
 Write-Output '--- deep alias (same roots as standard, explicit) ---'
 BigFile (Join-Path $r 'deepfix.log') 20 23
 (Get-Item (Join-Path $r 'deepfix.log')).LastWriteTime = (Get-Date).AddMinutes(-5)
@@ -178,4 +289,9 @@ else {
 
 Remove-Item $base -Recurse -Force -ErrorAction SilentlyContinue
 Remove-Item Env:\ZLOG_TEST_ROOT -ErrorAction SilentlyContinue
-if ($fail -eq 0) { Write-Output 'POWERSHELL TESTS ALL PASS' } else { Write-Output 'POWERSHELL TESTS FAILED'; exit 1 }
+# Exit explicitly on BOTH paths. Without `exit 0`, pwsh falls back to
+# $LASTEXITCODE, which the corrupt-archive fixtures have already set to 1 from
+# their deliberately-failing `gzip -d -c` calls — so a fully passing run
+# reported exit 1 and failed CI while printing "POWERSHELL TESTS ALL PASS".
+if ($fail -eq 0) { Write-Output 'POWERSHELL TESTS ALL PASS'; exit 0 }
+Write-Output 'POWERSHELL TESTS FAILED'; exit 1
