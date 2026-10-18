@@ -116,7 +116,7 @@ function DoClean() {
           $purged++
           $script:zlogQuarantine.Remove($q)
         } catch {
-          Write-Output "[zlog] WARNING: could not delete quarantined file $q (original $src absent); it remains at $q"
+          Write-Output "[zlog] WARNING (provisional): could not delete quarantined file $q; attempting restore to $src"
           $failed++
         }
       }
