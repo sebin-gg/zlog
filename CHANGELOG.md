@@ -4,6 +4,226 @@
 
 Fixed:
 
+- `restore` no longer deletes a pre-existing **dangling symlink** sitting at the
+  destination. The guard used `[ -e ]`, which follows symlinks and is therefore
+  false for a symlink whose target is missing, so the restore proceeded and the
+  failure path's `rm -f "$out"` destroyed a file zlog never created — while
+  printing "nothing written". The guard now also tests `[ -L ]`, and the
+  cleanup only runs when this invocation actually published the destination.
+- The empty-file **purge path now quarantines before it deletes**, in both
+  implementations. A path-based "check then unlink" can never be atomic, and the
+  two back-to-back identity reads that previously stood in for it caught nothing
+  — no work runs between them, so they only detected a write landing in the
+  microseconds that separated them. The file is now renamed out of the way
+  first, which removes the *name*: after that a writer opening by path cannot
+  reach the file at all, and a writer holding an open descriptor is what the
+  existing lock probe already screens for. Emptiness is tested after the rename,
+  and anything that gained content is put back untouched.
+- Content hashing was **removed** from the purge path rather than added to: for
+  a file that was empty, any write makes it non-empty, so the size test already
+  covers every case a content hash would — and on the PowerShell side `zlogIdent`
+  SHA-256s whole files, so this is also two fewer hashes per candidate.
+- The quarantine decision is keyed on the **artifact**, not on `mv`'s exit
+  status. Signalling the process group while the rename is in flight can kill
+  `mv` *after* it has already moved the file; trusting the status there dropped
+  the restore record and orphaned the file as `<name>.purge` debris. Found by a
+  test written to assert exactly that invariant.
+- Quarantined files are tracked separately from temp artifacts and are **renamed
+  back** on any exit path, never deleted: they are not ours to clean up and may
+  hold live data. Conflating the two would turn an interrupt into data loss.
+- A **failed move-back is reported instead of swallowed**. If another process
+  recreates the original name in the gap, `mv -n` will not overwrite it, so the
+  live data stays under the quarantine name. The old code dropped the restore
+  record and counted it as "skipped" — orphaning the data while still exiting 0.
+  Both implementations now verify the move-back by artifact, keep the record so
+  the exit path retries, print where the data is, and count it as a failure.
+- A **failed quarantine delete is reported instead of swallowed**, in both
+  implementations. The purge counted the failure but dropped the restore record
+  and named no path — leaving the data at `<name>.purge` with the original name
+  absent. The record is now kept so the exit path moves it back, the warning
+  names the quarantine path, and the run fails. (On the PowerShell side the
+  record-keeping fix from the previous round had left an unconditional `Remove`
+  that contradicted it; purge branches now manage the record explicitly.)
+- The shell exit trap's quarantine-restore loop **never ran**. `for i in
+  ${!ZLOG_QSRC[@]+"${!ZLOG_QSRC[@]}"}` parses the `!` as indirect expansion
+  over the values, so any live record list aborts with "invalid variable name"
+  and the body is skipped. Every earlier test passed because no record ever
+  survived to `EXIT` — each path dropped it first. Now that failure paths keep
+  the record, the loop is a plain index loop using the same `${#...}` length
+  form `zlog_quarantine_drop` already uses (safe under `set -u` back to bash
+  3.2). Found because a new test finally left a record at exit and watched the
+  trap fumble it; the fix was verified by reverting the loop alone and watching
+  that test fail.
+- `install.sh` distinguishes a **nested backup from a pre-existing same-named
+  child** by device+inode. Refusing the rollback into an occupied destination
+  is not enough: the previous installation may itself contain a top-level
+  `zlog` child, and name-matching alone would misreport a successful restore as
+  a nesting (or another process's directory as the backup). The backup is
+  fingerprinted before the move; only a same-identity child is reported as the
+  nested backup, a rode-along child is restored with a note, and a surviving
+  `BACKUP` is always reported first.
+- `clean` and `deep` now **exit non-zero when any file fails**. Both counted
+  failures into the report line but ended on a `du`/`echo` statement, so a run
+  where every file errored still exited 0 and any caller gating on the exit
+  status read total failure as success.
+- `zlog.sh` installs `EXIT`/`INT`/`TERM` traps. Temp artifacts are written next
+  to their source and only existed inside a compressor child, so a Ctrl-C or a
+  `kill` left a truncated `*.tmp.zst` in the user's log directory. Temps are now
+  tracked and removed on any exit path. (Bash defers `SIGINT` while a
+  foreground child runs, so the observable case is a process-group `SIGTERM`.)
+- `zlog.sh` no longer walks the entire home directory **twice** in `deep` /
+  `deep-preview`. The prune count was a second full `find ~` traversal purely to
+  print a number; the single traversal now emits both record kinds and callers
+  distinguish them with `[ -d ]`.
+- `install.sh` never destroys a backup to make room. `date +%S` has one-second
+  granularity, so two upgrades in the same second computed the same name and the
+  unconditional `rm -rf "$BACKUP"` deleted the only good copy; adding `$$` does
+  not close that either, since separate PID namespaces sharing a home directory
+  can reuse a PID within the same second. The backup container is now allocated
+  with `mktemp -d` — atomic, so nobody else can own the name — and deliberately
+  **kept**: the skill is moved in as a named child (`…bak.XXXXXXXXXX/zlog/`).
+  Releasing the reservation with `rmdir` first would reopen the hole, because
+  anything creating that path in the gap makes `mv` place the skill *inside* it,
+  leaving a reported "backup" that is not one and a rollback that restores from
+  the wrong place.
+- `install.sh` no longer claims "previous version restored" when the rollback
+  failed. The `mv "$BACKUP" "$SKILL_DIR" || true` swallowed the failure and the
+  message was printed unconditionally, leaving a user with no installed skill
+  and a reassuring log line. The rollback result is now checked, and on failure
+  the backup path is printed with a manual recovery command.
+- `install.sh` never rolls back **into** an occupied directory. If another
+  installer creates `$SKILL_DIR` after the promote fails, plain
+  `mv "$BACKUP" "$SKILL_DIR"` succeeds by nesting the backup as
+  `$SKILL_DIR/zlog` and still exits 0 — the old check-then-claim would report a
+  restore that never happened. The installer now refuses the move when the
+  destination is occupied and reports the backup path instead, and the success
+  claim additionally requires the backup to be gone *without* a nested copy left
+  behind (which a real restore never produces). A nested move that still slips
+  through the residual race is reported at its actual location.
+- The PowerShell purge keeps the quarantine record on a failed move-back. The
+  fix that made failures count as `failed` left an unconditional
+  `$script:zlogQuarantine.Remove($q)` after the branch, which dropped the record
+  the comment above it promises to keep for the `finally` retry — the shell
+  implementation keeps it (the exit trap retries), the PowerShell one did not.
+- `zlog_publish` treats any pre-existing destination entry as a conflict.
+  Besides the `-e`/`-L` fix above, the `mv -n` fallback now also requires the
+  destination to be a visible regular file that is not a symlink, since `mv -n`
+  exits 0 even when it declines to overwrite.
+
+Changed:
+
+- `install.sh` iterates `SKILL_FILES` as a bash array instead of a space-joined
+  string. `for f in $SKILL_FILES` relied on word splitting, so any future entry
+  containing a space or a glob character would silently split into bogus paths.
+  `tests/test-install.sh` mirrors the same array so the fixture cannot drift
+  from what the installer actually installs.
+- The unused `TMP_FILE="$(mktemp)"` in `install.sh` is gone; it was created and
+  trapped for cleanup on every run but never used.
+- `restore` declares its loop variables (`out`, `rc`, `tmp`, `tmpd`, `tmpf`)
+  `local` instead of leaking them into the global scope.
+
+Tests:
+
+- `tests/test-posix.sh` asserts on `lexists`, not `[ -e ]`, for the
+  dangling-symlink cases — `-e` is exactly the test that used to lie.
+- `tests/test-install.sh` asserts the rollback-failure test against the
+  **specific** backup path the installer printed. `ls -d "$DEST".bak.* | head -1`
+  could match a backup left by an earlier test, so the assertion could pass
+  without the one under test existing at all.
+- `tests/test-install.sh` covers a rollback where the destination is
+  **occupied by a concurrent installer**. A stubbed `mv` fails the promote and
+  recreates the destination with its own marker; the test asserts the installer
+  refuses the move (no `$DEST/zlog` nesting), leaves the occupant untouched, and
+  names the surviving backup. Verified the scenario nests and falsely claims
+  "previous version restored" against the pre-fix installer.
+- `tests/test-install.sh` covers a rollback where the previous installation
+  already contains a same-named `zlog` child. It asserts the successful rollback
+  is still reported as restored (not as a nesting) and the child rides along.
+  Fails against the name-matching check, which cried nesting.
+- `tests/test-install.sh` checks that each backup retains **its own** version.
+  Counting backups that merely contained `MARKER-` still passed if both held
+  the same marked copy and the other version had been lost.
+- `tests/test-posix.sh` drives the quarantine restore branch with a stubbed `mv`
+  that appends **after** the rename. The previous version appended before `clean`
+  even started, so `find -empty` never selected the file and the restore branch
+  never ran — the test passed even with that branch broken.
+- `tests/test-posix.sh` covers a quarantine **delete that fails** with a stubbed
+  `rm` refusing `*.purge` targets. It asserts the failure is counted, the
+  quarantine path is named, the exit is non-zero, and the exit trap puts the
+  file back with no debris. The last two assertions fail against both the old
+  drop-the-record code and against the fixed delete with the old (dead)
+  restore loop — so the one test pins both fixes.
+- `tests/test-posix.sh` no longer contains doubled `""` inside `eval`'d strings.
+  A mechanical rewrite had produced `\"\"$ZLOG_TEST_ROOT\"/x\"`, which bash reads
+  as `""` followed by an *unquoted* path — so the traversal/mismatch/corrupt
+  restore checks passed for the wrong reason and `newline archived` failed
+  outright whenever the fixture path contained a space. Verified by running the
+  whole suite under a `TMPDIR` containing a space.
+- `tests/test-posix.sh` quotes every variable that reaches `check`'s `eval`.
+  The "deep-preview changes nothing" checks passed `$HOME` unquoted, so they
+  word-split and silently **failed** (not skipped) on any path containing a
+  space, in a suite whose purpose is portability. 68 unquoted expansions across
+  the file are now quoted inside the `eval`'d string.
+- `tests/test-posix.sh`'s `tree_sum` now fingerprints path, entry type, size,
+  mtime **and content hash**. It previously hashed only the path list, so the
+  "deep-preview changes nothing" assertions could not see an in-place rewrite or
+  a truncation at all — a same-length content change produced an identical
+  fingerprint. NUL-separated throughout and deliberately unsorted: the fixture
+  contains a newline-bearing filename, and `sort -z` does not exist on BSD.
+- `tests/test-posix.sh` gains a self-test for the fingerprint itself, since a
+  helper that silently stops detecting changes would leave the two read-only
+  assertions looking green while proving nothing.
+- `tests/test-posix.sh` uses `SIGTERM` to the compressor's process group, not
+  `SIGINT`. Bash defers `SIGINT` while a foreground child runs, so the script
+  survives, takes its normal "compressor failed" branch and removes the temp
+  itself — which made an earlier version of the interrupt test pass vacuously
+  against the unfixed script. The compressor stub also has to create the temp
+  *before* stalling, exactly as `zstd -o` does.
+- `tests/test-install.sh` pins `date` to a frozen timestamp so the same-second
+  backup collision is deterministic instead of a race, and stubs `mv` to fail
+  the promote *and* the rollback while still allowing the backup step.
+- `tests/test-powershell.ps1` covers empty-archive restore, glob-metacharacter
+  destination names, the restore ownership flag, and the `clean` exit status.
+- `tests/test-powershell.ps1` `Check` now wraps each assertion in try/catch. A
+  single assertion that threw (for example reading a file a previous failure had
+  deleted) aborted the whole suite, hiding every later regression behind the
+  first one.
+- `tests/test-powershell.ps1` measures the `clean` exit status from a **child
+  process**. `& $Script` does not put a PowerShell script's exit status in
+  `$LASTEXITCODE`, which still holds whatever the last native command returned —
+  in that test, the stub compressor's own `1`. The assertion therefore passed
+  against the unfixed script for entirely the wrong reason.
+- `tests/test-powershell.ps1` now exits `0` explicitly on success. Without it
+  pwsh falls back to `$LASTEXITCODE`, which the corrupt-archive fixtures have
+  already set to `1` from their deliberately-failing `gzip -d -c` calls — a
+  fully passing run printed "POWERSHELL TESTS ALL PASS" and still failed CI.
+- `tests/test-powershell.ps1` skips the `clean` exit-status check on Windows.
+  The failure is injected by shadowing the compressor, and PowerShell refuses to
+  run a text file named `tar.exe` as a native command, while in-process function
+  shadowing cannot reach a child process.
+
+Also fixed in this cycle:
+
+- `scripts/zlog.ps1` had drifted from `scripts/zlog.sh` and carried the same
+  class of bugs. All four are fixed in the twin:
+  - The empty-file **purge path had no identity re-check**, unlike the
+    compression path right below it, which makes three. It now re-reads
+    identity and emptiness immediately before deleting.
+  - **`restore` accepted a legitimately empty archive**, matching the POSIX
+    side. The `.Length -gt 0` test rejected a 0-byte decompression, so
+    restoring an empty `.log` reported FAILED. (This fix had landed for
+    `zlog.sh` previously and was never ported.)
+  - **`restore` no longer deletes a file it did not write.** The failure path
+    ran `Remove-Item $out` unconditionally; a `$wrote` flag now records that
+    this run published the destination, so cleanup can only remove our own
+    artifact.
+  - **`clean`/`deep` now exit non-zero when any file fails.** `DoClean` ended on
+    the report line, so a run where every file errored still exited 0.
+- `scripts/zlog.ps1` uses `-LiteralPath` for every path derived from user input.
+  Plain `Test-Path`/`Remove-Item`/`Get-Item` treat `[` and `]` as wildcard
+  character classes, so a destination literally named `srv[1].log` **bypassed
+  the "destination exists" guard and the failure-path cleanup entirely** — the
+  protection silently did nothing for those names. Reproduced, then fixed.
 - `--older-than` now validates its argument. A non-numeric value aborted the
   script under `set -u` with `abc: unbound variable`, and a negative value
   built a nonsense `find -mmin "+-7199"` that reported zero candidates — a
